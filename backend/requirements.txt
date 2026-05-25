@@ -1,14 +1,32 @@
+# Web framework
 fastapi==0.115.5
 uvicorn[standard]==0.32.1
+
+# Database
 sqlalchemy==2.0.36
 aiosqlite==0.20.0
 greenlet==3.1.1
-anthropic==0.39.0
+
+# OCR — open-source handwriting recognition
+# EasyOCR (primary): installs PyTorch automatically (~800 MB on first install)
+easyocr>=1.7.2
+# OpenCV for image preprocessing (headless = no GUI libs needed on a server)
+opencv-python-headless>=4.10.0
+
+# Chess move validation and PGN generation
 chess>=1.10.0
-python-multipart==0.0.12
+
+# Image handling
 pillow==11.0.0
-python-dotenv==1.0.1
+
+# File uploads & async I/O
+python-multipart==0.0.12
+aiofiles==24.1.0
+
+# HTTP client (used by Ollama backend)
+httpx==0.27.2
+
+# Settings & validation
 pydantic==2.10.2
 pydantic-settings==2.6.1
-aiofiles==24.1.0
-httpx==0.27.2
+python-dotenv==1.0.1
