@@ -202,6 +202,7 @@ function backendGameSummaryToFrontend(g) {
     tournament: g.tournament_id != null ? String(g.tournament_id) : null,
     round: null,
     timeControl: null,
+    hasImage: !!g.has_image,
   };
 }
 
