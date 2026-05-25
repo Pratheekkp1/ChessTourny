@@ -143,6 +143,10 @@ This is the living feature checklist. Update it as work completes.
 - [x] **SwipeableTournamentCard** — swipe-left reveals Edit/Delete in TournamentsListScreen
 - [x] **Replay: speed control** — 0.5×/1×/1.5×/2× chip row above transport buttons
 - [x] **GamesListScreen: swipeable cards** — upgraded to `SwipeableGameCard` with edit/delete
+- [x] **Evaluation bar** — `EvalBar` shows material balance (Q=9 R=5 B/N=3 P=1) alongside board; animated transitions
+- [x] **Quick-add game (no scan)** — `QuickAddGameScreen`: enter opponent, result, date, round, event without a score sheet
+  - Backend: `POST /games/manual` (JSON body, no image required)
+  - Frontend: accessible from ScanAim "Enter without scanning" + TournamentScreen "+ Add" + GamesListScreen "+" button
 
 ### 🔲 TODO — ordered by priority
 
@@ -152,9 +156,6 @@ This is the living feature checklist. Update it as work completes.
 
 #### Tournament features
 - [ ] **Round count from backend** — `rounds` field is hardcoded to 5 in `backendTournamentToFrontend`; add to model
-
-#### Replay enhancements
-- [ ] **Evaluation bar** — material balance indicator alongside the board
 
 #### Home & general
 - [ ] **Rating history graph** — track rating over time per session (requires storing rating per game)

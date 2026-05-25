@@ -59,6 +59,17 @@ class GameUpdate(BaseModel):
     notes: str | None = None          # stored in ocr_warnings for now
 
 
+class GameCreate(BaseModel):
+    """Create a game without a score sheet (metadata-only)."""
+    white_player: str | None = None
+    black_player: str | None = None
+    result: GameResult = GameResult.unknown
+    game_date: date | None = None
+    round: str | None = None
+    event: str | None = None
+    tournament_id: int | None = None
+
+
 class PositionResponse(BaseModel):
     fen: str
     move_number: int

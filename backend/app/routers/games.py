@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models import Game, Move, Tournament
 from app.models.game import GameResult
-from app.schemas import GameResponse, GameSummary, GameUpdate, PositionResponse
+from app.schemas import GameResponse, GameSummary, GameUpdate, GameCreate, PositionResponse
 from app.services import ocr_service, chess_service, storage_service
 from pathlib import Path
 import json
@@ -122,6 +122,46 @@ async def create_game(
         )
         db.add(move)
 
+    await db.commit()
+    await db.refresh(game)
+    return _serialize_game(game)
+
+
+# ── Create a game without a score sheet (metadata only) ──────────────────────
+
+@router.post("/manual", response_model=GameResponse, status_code=201)
+async def create_game_manual(body: GameCreate, db: AsyncSession = Depends(get_db)):
+    """
+    Record a game result without uploading a score sheet.
+    Useful when the score sheet was lost or the game was informal.
+    No OCR or move validation is performed — only metadata is stored.
+    """
+    if body.tournament_id is not None:
+        t = await db.get(Tournament, body.tournament_id)
+        if not t:
+            raise HTTPException(404, "Tournament not found")
+
+    game_number = None
+    if body.tournament_id is not None:
+        result = await db.execute(
+            select(Game).where(Game.tournament_id == body.tournament_id)
+        )
+        game_number = len(result.scalars().all()) + 1
+
+    game = Game(
+        tournament_id=body.tournament_id,
+        game_number=game_number,
+        white_player=body.white_player,
+        black_player=body.black_player,
+        result=body.result,
+        game_date=body.game_date,
+        round=body.round,
+        event=body.event,
+        total_moves=0,
+        image_path=None,
+        ocr_warnings=None,
+    )
+    db.add(game)
     await db.commit()
     await db.refresh(game)
     return _serialize_game(game)

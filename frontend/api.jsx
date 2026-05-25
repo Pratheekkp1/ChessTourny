@@ -72,6 +72,24 @@ async function apiDeleteGame(id) {
   if (!r.ok) throw new Error(`Delete failed: ${r.status}`);
 }
 
+/** Create a game without a score sheet (metadata-only, no OCR). */
+async function apiCreateGameManual({ white, black, result, date, round, event, tournamentId }) {
+  const RESULT_MAP = { '1-0': 'white_won', '0-1': 'black_won', '½-½': 'draw', '*': 'unknown' };
+  return apiFetch('/games/manual', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      white_player: white || null,
+      black_player: black || null,
+      result: RESULT_MAP[result] || 'unknown',
+      game_date: date || null,
+      round: round || null,
+      event: event || null,
+      tournament_id: tournamentId != null ? tournamentId : null,
+    }),
+  });
+}
+
 /** Patch editable metadata. Only provided keys are updated. */
 async function apiUpdateGame(id, updates) {
   return apiFetch(`/games/${id}`, {
@@ -209,6 +227,7 @@ Object.assign(window, {
   apiGetGames,
   apiGetGame,
   apiCreateGame,
+  apiCreateGameManual,
   apiDeleteGame,
   apiUpdateGame,
   apiGetGameImageUrl,

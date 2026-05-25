@@ -581,8 +581,16 @@ function TournamentScreen({ nav, params }) {
                     padding: '14px 16px',
                     border: '1px dashed var(--border-strong)',
                     borderRadius: 14, color: 'var(--fg-3)',
+                    gap: 8,
                   }}>
-                    <span style={{ fontFamily: 'var(--sans)', fontSize: 13 }}>Not yet scanned</span>
+                    <span style={{ fontFamily: 'var(--sans)', fontSize: 13, flex: 1 }}>Not yet scanned</span>
+                    <div onClick={() => nav.go('quick-add-game', { tournamentId: t.id })} style={{
+                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                      padding: '4px 10px', borderRadius: 6,
+                      background: 'var(--surface-2)', color: 'var(--fg-2)',
+                      border: '1px solid var(--border)',
+                      letterSpacing: 0.6, textTransform: 'uppercase', cursor: 'pointer',
+                    }}>+ Add</div>
                     <div onClick={() => nav.go('scan', { tournamentId: t.id })} style={{
                       fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
                       padding: '4px 10px', borderRadius: 6,
@@ -1002,10 +1010,16 @@ function GamesListScreen({ nav }) {
           fontFamily: 'var(--display)', fontSize: 22, fontWeight: 700,
           letterSpacing: -0.5, flex: 1,
         }}>All Games</div>
-        <div style={{
-          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
-          fontWeight: 600, letterSpacing: 0.3,
-        }}>{filtered.length}</div>
+        <div onClick={() => nav.go('quick-add-game', {})} style={{
+          width: 32, height: 32, borderRadius: 9,
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', color: 'var(--fg)', flexShrink: 0,
+        }}>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+          </svg>
+        </div>
       </div>
 
       {/* Search */}
@@ -1223,6 +1237,171 @@ function EditGameScreen({ nav, params }) {
 }
 
 // ──────────────────────────────────────────────────────────
+// Quick-add game screen (no score sheet required)
+// ──────────────────────────────────────────────────────────
+function QuickAddGameScreen({ nav, params }) {
+  const tournamentId = params && params.tournamentId;
+  const tournament = tournamentId ? TOURNAMENTS.find(t => t.id === tournamentId) : null;
+
+  const RESULTS = [
+    { v: '1-0',  label: 'White won (1–0)' },
+    { v: '0-1',  label: 'Black won (0–1)' },
+    { v: '½-½',  label: 'Draw (½–½)' },
+    { v: '*',    label: 'Unknown / ongoing' },
+  ];
+
+  const [white, setWhite]   = React.useState('');
+  const [black, setBlack]   = React.useState('');
+  const [result, setResult] = React.useState('*');
+  const [date, setDate]     = React.useState(new Date().toISOString().split('T')[0]);
+  const [round, setRound]   = React.useState('');
+  const [event, setEvent]   = React.useState(tournament ? tournament.name : '');
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError]   = React.useState(null);
+
+  async function handleSave() {
+    if (!white.trim() && !black.trim()) {
+      setError('Enter at least one player name.'); return;
+    }
+    setSaving(true); setError(null);
+    try {
+      let savedGame;
+      if (window.LIVE_DATA_LOADED) {
+        // Try backend
+        const raw = await apiCreateGameManual({
+          white: white.trim() || 'Unknown',
+          black: black.trim() || 'Unknown',
+          result,
+          date: date || null,
+          round: round.trim() || null,
+          event: event.trim() || null,
+          tournamentId: tournamentId ? parseInt(tournamentId) : null,
+        });
+        savedGame = backendGameToFrontend(raw);
+      } else {
+        // Mock fallback
+        savedGame = {
+          id: 'm' + Date.now(),
+          _backendId: null,
+          white: white.trim() || 'Unknown',
+          black: black.trim() || 'Unknown',
+          result,
+          date: date || new Date().toISOString().split('T')[0],
+          eco: '—',
+          moves: [],
+          tournament: tournamentId || null,
+          round: round ? parseInt(round) : null,
+          event: event.trim() || null,
+        };
+      }
+      GAMES.unshift(savedGame);
+      nav.back();
+    } catch (e) {
+      setError(e.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{
+      paddingTop: 56, paddingBottom: 110,
+      background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
+    }}>
+      <div style={{ padding: '4px 20px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <BackButton onClick={() => nav.back()} />
+        <div style={{ flex: 1 }}>
+          <div style={{ fontFamily: 'var(--display)', fontSize: 20, fontWeight: 700 }}>Add game</div>
+          {tournament && (
+            <div style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)', letterSpacing: 0.4, marginTop: 1 }}>
+              {tournament.name}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div style={{
+        margin: '14px 20px 0',
+        background: 'rgba(255, 190, 60, 0.08)',
+        border: '1px solid rgba(255, 190, 60, 0.25)',
+        borderRadius: 10, padding: '10px 14px',
+        display: 'flex', alignItems: 'center', gap: 10,
+      }}>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M7 1.5L12.5 12H1.5L7 1.5z" stroke="#FFBE3C" strokeWidth="1.3" strokeLinejoin="round"/>
+          <path d="M7 5.5v3" stroke="#FFBE3C" strokeWidth="1.3" strokeLinecap="round"/>
+          <circle cx="7" cy="10" r="0.6" fill="#FFBE3C"/>
+        </svg>
+        <div style={{ fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5 }}>
+          No score sheet — moves won't be available for replay.
+          To analyze the game, scan a score sheet instead.
+        </div>
+      </div>
+
+      <div style={{ padding: '18px 20px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <LiveFormField label="White player" placeholder="e.g. Kasparov" value={white} onChange={setWhite} />
+        <LiveFormField label="Black player" placeholder="e.g. Karpov"   value={black} onChange={setBlack} />
+
+        <div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+            textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600, marginBottom: 6,
+          }}>Result</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {RESULTS.map(r => (
+              <div key={r.v} onClick={() => setResult(r.v)} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 14px', borderRadius: 10,
+                border: `1px solid ${result === r.v ? 'var(--ink)' : 'var(--border)'}`,
+                background: result === r.v ? 'var(--surface-inv)' : 'var(--surface)',
+                color: result === r.v ? 'var(--fg-inv)' : 'var(--fg)',
+                cursor: 'pointer',
+              }}>
+                <div style={{
+                  width: 18, height: 18, borderRadius: '50%',
+                  border: `2px solid ${result === r.v ? 'var(--fg-inv)' : 'var(--border-strong)'}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                }}>
+                  {result === r.v && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--fg-inv)' }} />}
+                </div>
+                <span style={{ fontFamily: 'var(--sans)', fontSize: 14 }}>{r.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <LiveFormField label="Date" placeholder="YYYY-MM-DD" value={date} onChange={setDate} flex />
+          <LiveFormField label="Round" placeholder="e.g. 3" value={round} onChange={setRound} flex />
+        </div>
+        <LiveFormField label="Event" placeholder="e.g. City Open" value={event} onChange={setEvent} />
+
+        {error && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--loss)' }}>{error}</div>
+        )}
+      </div>
+
+      <div style={{
+        position: 'absolute', bottom: 92, left: 0, right: 0,
+        padding: '14px 20px 0',
+        background: 'linear-gradient(to top, var(--bg) 60%, transparent)',
+      }}>
+        <div onClick={saving ? undefined : handleSave} style={{
+          height: 52, width: '100%', borderRadius: 14,
+          background: saving ? 'var(--fg-3)' : 'var(--ink)',
+          color: 'var(--paper)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600,
+          cursor: saving ? 'default' : 'pointer',
+          opacity: saving ? 0.7 : 1,
+          boxShadow: saving ? 'none' : 'var(--shadow-2)',
+        }}>{saving ? 'Saving…' : 'Add game'}</div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
 // Edit Tournament screen
 // ──────────────────────────────────────────────────────────
 function EditTournamentScreen({ nav, params }) {
@@ -1400,7 +1579,7 @@ function EmptyState({ icon, title, body, action, onAction }) {
 Object.assign(window, {
   AppHeader, SectionLabel, TournamentCard, GameCard, ResultBadge, StatTile,
   HomeScreen, TournamentScreen, TournamentsListScreen, GamesListScreen,
-  EditGameScreen, EditTournamentScreen,
+  EditGameScreen, EditTournamentScreen, QuickAddGameScreen,
   SwipeableGameCard, SwipeableTournamentCard,
   ActionSheet, EmptyState,
   computeUserStats,

@@ -145,7 +145,7 @@ function ScanScreen({ nav, tournamentId, onGameSaved }) {
   }, [step]);
 
   if (step === 'aim') return (
-    <ScanAim nav={nav} onCapture={handleDemoCapture} onFileSelected={handleFileSelected} />
+    <ScanAim nav={nav} tournamentId={tournamentId} onCapture={handleDemoCapture} onFileSelected={handleFileSelected} />
   );
   if (step === 'capturing') return <ScanCapturing onDone={onCaptureDone} />;
   if (step === 'reading') return <ScanReading moves={OPERA} scannedThrough={Math.floor(scannedThrough / 40 * OPERA.length)} label="Analyzing handwriting…" />;
@@ -266,7 +266,7 @@ function CameraPermissionModal({ permState, onAllow, onDismiss }) {
 }
 
 // ─── Scan aim screen ──────────────────────────────────────────────────────────
-function ScanAim({ nav, onCapture, onFileSelected }) {
+function ScanAim({ nav, tournamentId, onCapture, onFileSelected }) {
   const fileInputRef = React.useRef(null);
   const [showPermModal, setShowPermModal] = React.useState(false);
   const [permState, setPermState]         = React.useState('idle'); // idle | requesting | granted | denied
@@ -387,7 +387,7 @@ function ScanAim({ nav, onCapture, onFileSelected }) {
 
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '0 36px 56px',
+        padding: '0 36px 16px',
       }}>
         {/* FILE — opens photo library directly (no camera permission needed) */}
         <div onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{
@@ -425,6 +425,15 @@ function ScanAim({ nav, onCapture, onFileSelected }) {
           </svg>
         </div>
       </div>
+      {/* Manual entry link */}
+      <div onClick={() => nav.go('quick-add-game', { tournamentId })} style={{
+        textAlign: 'center', paddingBottom: 40,
+        fontFamily: '"Geist Mono", monospace', fontSize: 10,
+        color: 'rgba(255,255,255,0.45)',
+        letterSpacing: 0.6, textTransform: 'uppercase',
+        fontWeight: 600, cursor: 'pointer',
+        textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.2)',
+      }}>Enter without scanning</div>
     </div>
   );
 }
