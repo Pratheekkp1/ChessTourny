@@ -244,18 +244,14 @@ function NewTournamentScreen({ nav, onCreated }) {
     setSaving(true); setError(null);
     try {
       const numRounds = rounds.trim() ? parseInt(rounds.trim()) : null;
-      const raw = await apiCreateTournament({
+      await apiCreateTournament({
         name: name.trim(),
         location: venue.trim() || null,
         startDate: startDate || null,
         endDate: endDate || null,
+        numRounds: numRounds || null,
+        color: color || null,
       });
-      // Patch num_rounds separately since apiCreateTournament doesn't support it yet
-      if (numRounds && raw && raw.id) {
-        try {
-          await apiUpdateTournament(raw.id, { num_rounds: numRounds });
-        } catch (_) {}
-      }
       if (onCreated) await onCreated();
       nav.back();
     } catch (e) {

@@ -76,6 +76,7 @@ def _with_game_count(tournament: Tournament, count: int) -> dict:
         "start_date": tournament.start_date,
         "end_date": tournament.end_date,
         "num_rounds": getattr(tournament, "num_rounds", None),
+        "color": getattr(tournament, "color", None),
         "game_count": count,
         "created_at": tournament.created_at,
         "updated_at": tournament.updated_at,

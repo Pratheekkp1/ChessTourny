@@ -23,6 +23,7 @@ async def init_db():
         # support ALTER TABLE ADD COLUMN IF NOT EXISTS, so we catch the error)
         for sql in [
             "ALTER TABLE tournaments ADD COLUMN num_rounds INTEGER",
+            "ALTER TABLE tournaments ADD COLUMN color VARCHAR(32)",
         ]:
             try:
                 await conn.exec_driver_sql(sql)

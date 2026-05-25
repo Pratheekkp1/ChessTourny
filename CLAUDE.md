@@ -148,22 +148,23 @@ This is the living feature checklist. Update it as work completes.
   - Backend: `POST /games/manual` (JSON body, no image required)
   - Frontend: accessible from ScanAim "Enter without scanning" + TournamentScreen "+ Add" + GamesListScreen "+" button
 
+- [x] **Tournament `rounds` field** — `num_rounds` in Tournament model + auto-migration + schema + frontend converter
+- [x] **NewTournamentScreen**: rounds, end date, color picker are all wired to state and saved
+- [x] **EditTournamentScreen**: rounds field added, saved to backend `num_rounds`
+- [x] **No-moves badge on GameCard** — quick-add games show "No score sheet" instead of move count
+
 ### 🔲 TODO — ordered by priority
 
 #### Scan improvements
 - [ ] **Retry OCR** — re-upload or re-scan if OCR confidence is low
 - [ ] **Manual move entry** — fallback if OCR fails: tap to select moves from a piece picker
 
-#### Tournament features
-- [ ] **Round count from backend** — `rounds` field is hardcoded to 5 in `backendTournamentToFrontend`; add to model
-
 #### Home & general
 - [ ] **Rating history graph** — track rating over time per session (requires storing rating per game)
 - [ ] **Upcoming round prompts** — if a tournament has future rounds, show next round on home
 
 #### Backend
-- [ ] **Tournament `rounds` field** — add to Tournament model, schema, and frontend converter
-- [ ] **Tournament `color` field** — persist chosen accent color in DB
+- [ ] **Tournament `color` field** — persist chosen accent color in DB (currently in-memory only)
 - [ ] **Performance rating** — Buchholz / FIDE perf formula per tournament
 - [ ] **Search endpoint** — `GET /games?q=smith` for player name full-text search
 

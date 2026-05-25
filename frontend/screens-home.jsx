@@ -1425,8 +1425,16 @@ function EditTournamentScreen({ nav, params }) {
   const [rounds, setRounds]       = React.useState(t.rounds ? String(t.rounds) : '');
   const [startDate, setStartDate] = React.useState(t.startDate || '');
   const [endDate, setEndDate]     = React.useState(t.endDate || '');
+  const [color, setColor]         = React.useState(t.color || 'walnut');
   const [saving, setSaving]       = React.useState(false);
   const [error, setError]         = React.useState(null);
+
+  const colorOptions = [
+    { key: 'walnut', css: 'var(--walnut)' },
+    { key: 'moss',   css: 'var(--moss)'   },
+    { key: 'ink',    css: 'var(--ink)'    },
+    { key: 'brick',  css: 'var(--brick)'  },
+  ];
 
   async function handleSave() {
     if (!name.trim()) { setError('Tournament name is required.'); return; }
@@ -1439,6 +1447,7 @@ function EditTournamentScreen({ nav, params }) {
         start_date: startDate ? new Date(startDate).toISOString() : null,
         end_date:   endDate   ? new Date(endDate).toISOString()   : null,
         num_rounds: numRounds,
+        color: color || null,
       };
       if (t._backendId) {
         await apiUpdateTournament(t._backendId, updates);
@@ -1452,6 +1461,7 @@ function EditTournamentScreen({ nav, params }) {
           rounds: numRounds,
           startDate: startDate || t.startDate,
           endDate:   endDate   || t.endDate,
+          color,
         });
       }
       nav.back();
@@ -1480,6 +1490,27 @@ function EditTournamentScreen({ nav, params }) {
           <LiveFormField label="Start date" placeholder="YYYY-MM-DD" value={startDate} onChange={setStartDate} flex />
         </div>
         <LiveFormField label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={setEndDate} />
+
+        <div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+            textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600, marginBottom: 8,
+          }}>Folder color</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {colorOptions.map(({ key, css }) => (
+              <div key={key} onClick={() => setColor(key)} style={{
+                flex: 1, height: 40, borderRadius: 10,
+                border: color === key ? '3px solid var(--fg)' : '1px solid var(--border)',
+                background: css,
+                display: 'flex', alignItems: 'flex-end', padding: 5,
+                color: '#fff', fontFamily: 'var(--mono)', fontSize: 9,
+                textTransform: 'uppercase', letterSpacing: 1, cursor: 'pointer',
+                fontWeight: 600,
+                boxShadow: color === key ? 'var(--shadow-2)' : 'none',
+              }}>{key}</div>
+            ))}
+          </div>
+        </div>
 
         {error && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--loss)', padding: '4px 0' }}>
