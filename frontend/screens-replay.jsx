@@ -212,18 +212,22 @@ function ReplayView({ nav, game, moves }) {
         />
       </div>
 
-      {/* board — swipeable */}
+      {/* board — swipeable, with evaluation bar */}
       <div
         ref={swipeRef}
         onPointerDown={handleBoardPointerDown}
         onPointerUp={handleBoardPointerUp}
         style={{
-          display: 'flex', justifyContent: 'center',
+          display: 'flex', justifyContent: 'center', alignItems: 'flex-start',
           padding: '4px 20px 12px',
           touchAction: 'pan-y',
           userSelect: 'none',
+          gap: 10,
         }}
       >
+        {/* Evaluation bar (left of board) */}
+        <EvalBar position={currentPosition} flipped={flipped} height={348} />
+
         <div style={{
           padding: 4, borderRadius: 8,
           background: 'var(--surface)',
@@ -231,7 +235,7 @@ function ReplayView({ nav, game, moves }) {
           border: '1px solid var(--border)',
           overflow: 'hidden',
         }}>
-          <ChessBoard position={currentPosition} lastMove={currentMove} size={340} flipped={flipped} />
+          <ChessBoard position={currentPosition} lastMove={currentMove} size={320} flipped={flipped} />
         </div>
       </div>
 
@@ -585,6 +589,68 @@ function ReplayView({ nav, game, moves }) {
   );
 }
 
+// ── Material-based evaluation bar ────────────────────────────────────────────
+const PIECE_VALUES = { p: 1, n: 3, b: 3, r: 5, q: 9, k: 0 };
+
+function materialBalance(position) {
+  let score = 0;
+  for (const row of position) {
+    for (const p of row) {
+      if (!p) continue;
+      const val = PIECE_VALUES[p.toLowerCase()] || 0;
+      score += p === p.toUpperCase() ? val : -val; // white positive, black negative
+    }
+  }
+  return score; // clamped display range ±15
+}
+
+function EvalBar({ position, flipped, height }) {
+  const raw = materialBalance(position);
+  const clamped = Math.max(-15, Math.min(15, raw));
+  // pct = white's portion of the bar (50% = equal, 100% = white up 15+)
+  const whitePct = ((clamped + 15) / 30) * 100;
+  const whiteTop = flipped ? whitePct : (100 - whitePct); // top of bar = "top side" player
+
+  return (
+    <div style={{
+      width: 12, height: height, borderRadius: 6,
+      background: 'var(--border)', overflow: 'hidden',
+      flexShrink: 0, alignSelf: 'stretch',
+      position: 'relative',
+    }}>
+      {/* Black portion (top) */}
+      <div style={{
+        position: 'absolute', top: 0, left: 0, right: 0,
+        height: `${100 - whitePct}%`,
+        background: '#14151A',
+        transition: 'height 0.4s ease',
+        borderRadius: raw > 0 ? '6px 6px 0 0' : 6,
+      }} />
+      {/* White portion (bottom) */}
+      <div style={{
+        position: 'absolute', bottom: 0, left: 0, right: 0,
+        height: `${whitePct}%`,
+        background: '#FFFFFF',
+        transition: 'height 0.4s ease',
+        borderRadius: raw < 0 ? '0 0 6px 6px' : 6,
+      }} />
+      {/* Score label */}
+      {Math.abs(raw) >= 1 && (
+        <div style={{
+          position: 'absolute',
+          top: raw < 0 ? 4 : undefined,
+          bottom: raw >= 0 ? 4 : undefined,
+          left: '50%', transform: 'translateX(-50%)',
+          fontFamily: 'var(--mono)', fontSize: 8, fontWeight: 700,
+          color: raw < 0 ? '#fff' : '#14151A',
+          letterSpacing: 0,
+          writingMode: 'vertical-rl',
+        }}>{raw > 0 ? '+' : ''}{raw}</div>
+      )}
+    </div>
+  );
+}
+
 function IconBtn({ children, onClick, title }) {
   return (
     <div onClick={onClick} title={title} style={{
@@ -737,4 +803,4 @@ function Scrubber({ value, max, onChange }) {
   );
 }
 
-Object.assign(window, { ReplayScreen, PlayerRow, ResultStrip, Scrubber, TransportBtn, IconBtn });
+Object.assign(window, { ReplayScreen, PlayerRow, ResultStrip, Scrubber, TransportBtn, IconBtn, EvalBar });
