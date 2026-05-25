@@ -258,9 +258,12 @@ function ReplayView({ nav, game, moves }) {
         <div style={{
           fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)',
           letterSpacing: 0.4, fontWeight: 600,
-          whiteSpace: 'nowrap',
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          maxWidth: '55%',
         }}>
-          {ply === 0 ? 'STARTING POSITION' : `MOVE ${Math.ceil(ply / 2)}${ply % 2 === 1 ? '' : '…'}`}
+          {ply === 0
+            ? (game.eco && game.eco !== '—' ? game.eco.split(' — ').pop() : 'Starting position')
+            : `Move ${Math.ceil(ply / 2)}${ply % 2 === 1 ? '' : '…'}`}
         </div>
         {currentMove?.comment && (
           <div style={{
@@ -315,6 +318,28 @@ function ReplayView({ nav, game, moves }) {
           <span>End</span>
         </div>
       </div>
+
+      {/* User note (from edit-game screen) */}
+      {game.note && (() => {
+        const userNote = game.note.split('\n').find(w => w.startsWith('[user note]'));
+        const text = userNote ? userNote.replace('[user note]', '').trim() : null;
+        return text ? (
+          <div style={{
+            margin: '0 20px 8px',
+            background: 'var(--surface-2)', borderRadius: 10,
+            border: '1px solid var(--border)',
+            padding: '8px 12px',
+            fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--fg-2)',
+            lineHeight: 1.5,
+          }}>
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)',
+              textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 700, marginRight: 8,
+            }}>Note</span>
+            {text}
+          </div>
+        ) : null;
+      })()}
 
       {/* transport */}
       <div style={{
