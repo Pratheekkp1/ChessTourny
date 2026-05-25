@@ -349,6 +349,21 @@ function HomeScreen({ nav, today, user, mode }) {
   const wld = stats.total > 0 ? `${stats.wins}–${stats.losses}–${stats.draws}` : '—';
   const winPct = stats.total > 0 ? Math.round((stats.wins / stats.total) * 100) + '%' : '—';
 
+  // Find the first active tournament with an upcoming unplayed round
+  const upcomingRound = (() => {
+    for (const t of TOURNAMENTS) {
+      if (!t.rounds) continue;
+      const tGames = GAMES.filter(g => g.tournament === t.id);
+      const scannedRounds = tGames.map(g => g.round).filter(Boolean).map(Number);
+      const maxScanned = scannedRounds.length > 0 ? Math.max(...scannedRounds) : 0;
+      const nextRound = maxScanned + 1;
+      if (nextRound <= t.rounds) return { tournament: t, round: nextRound };
+    }
+    return null;
+  })();
+
+  const colorMap = { walnut: 'var(--walnut)', moss: 'var(--moss)', ink: 'var(--ink)', brick: 'var(--brick)' };
+
   return (
     <div style={{
       paddingBottom: 110, paddingTop: 54,
@@ -365,6 +380,62 @@ function HomeScreen({ nav, today, user, mode }) {
         <StatTile value={wld} label="W–L–D" />
         <StatTile value={winPct} label="Win rate" accent="var(--win)" />
       </div>
+
+      {/* Upcoming round prompt */}
+      {upcomingRound && (
+        <div style={{ padding: '14px 20px 0' }}>
+          <div
+            onClick={() => nav.go('quick-add-game', {
+              tournamentId: upcomingRound.tournament.id,
+              round: String(upcomingRound.round),
+            })}
+            style={{
+              background: colorMap[upcomingRound.tournament.color] || 'var(--walnut)',
+              borderRadius: 14,
+              padding: '13px 16px',
+              display: 'flex', alignItems: 'center', gap: 12,
+              cursor: 'pointer',
+              boxShadow: 'var(--shadow-2)',
+            }}
+          >
+            <div style={{
+              width: 38, height: 38, borderRadius: 10,
+              background: 'rgba(255,255,255,0.18)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                <path d="M9 4v5l3 3" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="9" cy="9" r="7" stroke="white" strokeWidth="1.6"/>
+              </svg>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{
+                fontFamily: 'var(--mono)', fontSize: 9, color: 'rgba(255,255,255,0.75)',
+                textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700,
+                marginBottom: 2,
+              }}>Up next</div>
+              <div style={{
+                fontFamily: 'var(--display)', fontSize: 15, fontWeight: 700,
+                color: '#fff', letterSpacing: -0.2,
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>
+                Round {upcomingRound.round} · {upcomingRound.tournament.name}
+              </div>
+            </div>
+            <div style={{
+              width: 30, height: 30, borderRadius: 8,
+              background: 'rgba(255,255,255,0.18)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              flexShrink: 0,
+            }}>
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M5 2l5 5-5 5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ marginTop: 22 }}>
         <SectionLabel action={tournaments.length + ' active'}>Tournaments</SectionLabel>
@@ -1266,7 +1337,7 @@ function QuickAddGameScreen({ nav, params }) {
   const [black, setBlack]   = React.useState('');
   const [result, setResult] = React.useState('*');
   const [date, setDate]     = React.useState(new Date().toISOString().split('T')[0]);
-  const [round, setRound]   = React.useState('');
+  const [round, setRound]   = React.useState(params && params.round ? String(params.round) : '');
   const [event, setEvent]   = React.useState(tournament ? tournament.name : '');
   const [saving, setSaving] = React.useState(false);
   const [error, setError]   = React.useState(null);

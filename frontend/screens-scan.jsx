@@ -82,6 +82,15 @@ function ScanScreen({ nav, tournamentId, onGameSaved }) {
     setStep('capturing');
   }
 
+  // Retry OCR with the same image (skip camera/capture step)
+  function handleRetryWithSame() {
+    if (!imageFile) return;
+    setApiGame(null);
+    setApiError(null);
+    apiPromiseRef.current = apiCreateGame(imageFile, tournamentId != null ? tournamentId : undefined);
+    setStep('reading');
+  }
+
   // Demo shutter (no real image) → use built-in OPERA animation
   function handleDemoCapture() {
     setImageFile(null);
@@ -161,7 +170,14 @@ function ScanScreen({ nav, tournamentId, onGameSaved }) {
     />
   );
   if (step === 'error') return (
-    <ScanError error={apiError} nav={nav} tournamentId={tournamentId} onRetry={() => { setStep('aim'); setApiError(null); setImageFile(null); }} />
+    <ScanError
+      error={apiError}
+      nav={nav}
+      tournamentId={tournamentId}
+      imageFile={imageFile}
+      onRetry={() => { setStep('aim'); setApiError(null); setImageFile(null); }}
+      onRetryWithSame={imageFile ? handleRetryWithSame : null}
+    />
   );
   return null;
 }
@@ -826,45 +842,81 @@ function MoveGrid({ moves, currentPly = -1, onTap }) {
   );
 }
 
-function ScanError({ error, nav, onRetry, tournamentId }) {
+function ScanError({ error, nav, onRetry, onRetryWithSame, tournamentId, imageFile }) {
   return (
     <div style={{
       position: 'absolute', inset: 0, background: 'var(--bg)',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       justifyContent: 'center', padding: '40px 32px', color: 'var(--fg)',
     }}>
+      {/* Icon */}
       <div style={{
-        fontFamily: 'var(--display)', fontSize: 36, color: 'var(--loss)',
-        fontWeight: 700, letterSpacing: -1, marginBottom: 12,
-      }}>Hmm.</div>
+        width: 64, height: 64, borderRadius: 18,
+        background: 'var(--surface-2)', border: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        marginBottom: 20,
+      }}>
+        <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <path d="M14 9v6M14 18.5v.5" stroke="var(--loss)" strokeWidth="2.2" strokeLinecap="round"/>
+          <circle cx="14" cy="14" r="11" stroke="var(--loss)" strokeWidth="1.8"/>
+        </svg>
+      </div>
+
       <div style={{
-        fontFamily: 'var(--sans)', fontSize: 14, color: 'var(--fg-2)',
-        textAlign: 'center', marginBottom: 8, maxWidth: 280, lineHeight: 1.5,
-      }}>Couldn't read the score sheet.</div>
+        fontFamily: 'var(--display)', fontSize: 22, color: 'var(--fg)',
+        fontWeight: 700, letterSpacing: -0.5, marginBottom: 8, textAlign: 'center',
+      }}>Couldn't read the score sheet</div>
       <div style={{
-        fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)',
-        textAlign: 'center', marginBottom: 36, maxWidth: 300,
-      }}>{error}</div>
-      <div style={{ display: 'flex', gap: 10, width: '100%', maxWidth: 280 }}>
-        <div onClick={() => nav.back()} style={{
-          flex: 1, height: 48, borderRadius: 12,
+        fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg-2)',
+        textAlign: 'center', marginBottom: 6, maxWidth: 280, lineHeight: 1.5,
+      }}>The handwriting recognition struggled with this image. Try a clearer photo with good lighting.</div>
+      {error && (
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+          textAlign: 'center', marginBottom: 0, maxWidth: 300,
+          background: 'var(--surface-2)', borderRadius: 8,
+          padding: '6px 12px', border: '1px solid var(--border)',
+        }}>{error}</div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 290, marginTop: 28 }}>
+        {/* Primary: retry with same image (if available) */}
+        {onRetryWithSame && (
+          <div onClick={onRetryWithSame} style={{
+            height: 50, borderRadius: 13,
+            background: 'var(--ink)', color: 'var(--paper)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+            fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 600,
+            cursor: 'pointer', boxShadow: 'var(--shadow-2)',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2 8a6 6 0 1 0 1.5-3.9M2 4v4h4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Retry OCR
+          </div>
+        )}
+
+        {/* Secondary: try a new photo */}
+        <div onClick={onRetry} style={{
+          height: 50, borderRadius: 13,
           border: '1px solid var(--border)', background: 'var(--surface)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
           fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 600,
           color: 'var(--fg)', cursor: 'pointer',
-        }}>Cancel</div>
-        <div onClick={onRetry} style={{
-          flex: 1, height: 48, borderRadius: 12,
-          background: 'var(--ink)', color: 'var(--paper)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 600,
-          cursor: 'pointer', boxShadow: 'var(--shadow-2)',
-        }}>Try again</div>
+        }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <rect x="1" y="4" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.6"/>
+            <circle cx="8" cy="9" r="2.5" stroke="currentColor" strokeWidth="1.4"/>
+            <path d="M5 4l1-2h4l1 2" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Try new photo
+        </div>
       </div>
+
       <div
         onClick={() => nav.go('quick-add-game', { tournamentId })}
         style={{
-          marginTop: 20,
+          marginTop: 22,
           fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
           letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 600,
           cursor: 'pointer', textDecoration: 'underline',
