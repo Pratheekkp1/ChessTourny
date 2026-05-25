@@ -164,16 +164,46 @@ def _empty_result(warnings: list[str]) -> dict:
 
 # ─── Image preprocessing ─────────────────────────────────────────────────────
 
+_MAX_SIDE = 2800   # pixels — phone photos are often 12 MP+; cap for speed
+
+
+def _load_and_orient(image_path: str) -> Image.Image:
+    """
+    Open an image with PIL, apply EXIF orientation, and downscale if needed.
+    Phone photos arrive with EXIF rotation tags; OpenCV ignores them, causing
+    90°/180°-rotated detection results.  PIL's ImageOps.exif_transpose fixes it.
+    """
+    from PIL import ImageOps
+    pil = Image.open(image_path).convert("RGB")
+
+    # Fix EXIF rotation (portrait shots, etc.)
+    try:
+        pil = ImageOps.exif_transpose(pil)
+    except Exception:
+        pass  # some images have no EXIF; that's fine
+
+    # Downscale very large photos — CRAFT + TrOCR don't need 12 MP resolution
+    w, h = pil.size
+    if max(w, h) > _MAX_SIDE:
+        scale = _MAX_SIDE / max(w, h)
+        pil = pil.resize((max(1, int(w * scale)), max(1, int(h * scale))), Image.LANCZOS)
+        logger.info(f"Resized {w}×{h} → {pil.size[0]}×{pil.size[1]} for OCR performance")
+
+    return pil
+
+
 def _preprocess(image_path: str) -> np.ndarray:
     """
-    Load the score sheet and enhance it for handwriting detection.
-    Returns an RGB numpy array.
+    Load the score sheet, apply EXIF rotation + downscale, then enhance for
+    handwriting detection (denoise + adaptive threshold).
+    Returns an RGB numpy array ready for CRAFT.
     """
     try:
         import cv2  # type: ignore
-        img_bgr = cv2.imread(image_path)
-        if img_bgr is None:
-            raise ValueError("cv2.imread returned None")
+
+        pil = _load_and_orient(image_path)
+        img_rgb = np.array(pil)
+        img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
         gray   = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
         gray   = cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
@@ -185,8 +215,8 @@ def _preprocess(image_path: str) -> np.ndarray:
         return cv2.cvtColor(thresh, cv2.COLOR_GRAY2RGB)
 
     except Exception as exc:
-        logger.warning(f"Preprocessing failed ({exc}); loading image with PIL.")
-        return np.array(Image.open(image_path).convert("RGB"))
+        logger.warning(f"Preprocessing failed ({exc}); falling back to raw PIL load.")
+        return np.array(_load_and_orient(image_path))
 
 
 # ─── TrOCR batched recognition ────────────────────────────────────────────────
@@ -254,21 +284,29 @@ def _bbox_center(bbox) -> tuple[float, float]:
     return (sum(xs) / len(xs), sum(ys) / len(ys))
 
 
-def _run_ocr_pipeline(image_path: str) -> list[tuple[float, float, str, float]]:
+def _run_ocr_pipeline(
+    image_path: str,
+) -> tuple[list[tuple[float, float, str, float]], int, int]:
     """
     Stage 1 — CRAFT detects text regions.
     Stage 2 — TrOCR reads each region.
-    Returns flat list of (cx, cy, text, confidence).
+
+    Returns:
+        (blocks, img_w, img_h)
+        blocks  — flat list of (cx, cy, text, confidence)
+        img_w/h — pixel dimensions of the preprocessed image that CRAFT ran on
+                  (may differ from the original after EXIF rotation or downscale)
     """
     reader  = _get_easyocr_reader()
     img_rgb = _preprocess(image_path)
+    img_h, img_w = img_rgb.shape[:2]   # preprocessed dimensions (post-rotate/resize)
 
     logger.info("CRAFT: detecting text regions …")
     raw = reader.readtext(img_rgb, detail=1)   # [(bbox, text, conf), ...]
     logger.info(f"CRAFT: {len(raw)} regions detected.")
 
     if not raw:
-        return []
+        return [], img_w, img_h
 
     # Build detection list with EasyOCR's own text as fallback
     detections: list[dict] = []
@@ -287,7 +325,7 @@ def _run_ocr_pipeline(image_path: str) -> list[tuple[float, float, str, float]]:
     logger.info("TrOCR: recognizing handwriting …")
     results = _recognize_batch(img_rgb, detections)
     logger.info(f"TrOCR: recognition complete ({len(results)} tokens).")
-    return results
+    return results, img_w, img_h
 
 
 # ─── Layout analysis ─────────────────────────────────────────────────────────
@@ -463,18 +501,18 @@ def _parse_with_local_models(image_path: str) -> dict:
     """
     End-to-end local OCR: CRAFT detection → TrOCR recognition → layout parsing.
     Runs synchronously (call from executor to avoid blocking the event loop).
+
+    We use the preprocessed image's dimensions (post-EXIF-rotate, post-resize)
+    for layout math, because CRAFT bounding boxes are in that coordinate space.
     """
     logger.info(f"Local OCR: starting pipeline for {image_path}")
 
-    blocks = _run_ocr_pipeline(image_path)
+    blocks, img_w, img_h = _run_ocr_pipeline(image_path)
     if not blocks:
         return _empty_result(["No text detected in image."])
 
-    pil      = Image.open(image_path)
-    img_w, img_h = pil.size
-
-    # Split: top 28% = header, rest = move table
-    header_y = img_h * 0.28
+    # Split: top 28% = header region, rest = move table
+    header_y      = img_h * 0.28
     header_blocks = [(cx, cy, t, c) for cx, cy, t, c in blocks if cy < header_y]
     table_blocks  = [(cx, cy, t, c) for cx, cy, t, c in blocks if cy >= header_y]
 

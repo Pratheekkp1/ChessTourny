@@ -64,10 +64,9 @@ def parse_and_validate_moves(raw_moves: list[dict]) -> dict:
                 white_annotation = auto_ann
             move_data["white_annotation"] = white_annotation
 
-            white_move = _try_push_san(board, clean_white, move_number, "White", warnings)
+            white_move, white_san_valid = _try_push_san(board, clean_white, move_number, "White", warnings)
             if white_move:
-                move_data["white_san"] = board.san(white_move) if False else clean_white
-                # board already has the move pushed; get san before push
+                move_data["white_san"] = white_san_valid  # canonical validated SAN
                 move_data["white_uci"] = white_move.uci()
                 move_data["fen_after_white"] = board.fen()
             else:
@@ -83,9 +82,9 @@ def parse_and_validate_moves(raw_moves: list[dict]) -> dict:
                 black_annotation = auto_ann
             move_data["black_annotation"] = black_annotation
 
-            black_move = _try_push_san(board, clean_black, move_number, "Black", warnings)
+            black_move, black_san_valid = _try_push_san(board, clean_black, move_number, "Black", warnings)
             if black_move:
-                move_data["black_san"] = clean_black
+                move_data["black_san"] = black_san_valid  # canonical validated SAN
                 move_data["black_uci"] = black_move.uci()
                 move_data["fen_after_black"] = board.fen()
             else:
@@ -106,16 +105,22 @@ def parse_and_validate_moves(raw_moves: list[dict]) -> dict:
 
 def _try_push_san(
     board: chess.Board, san: str, move_number: int, side: str, warnings: list
-) -> chess.Move | None:
-    """Try to parse and push a SAN move. Returns the move if successful, else None."""
+) -> tuple[chess.Move | None, str | None]:
+    """
+    Try to parse and push a SAN move.
+    Returns (move, validated_san) on success, (None, None) on failure.
+    validated_san is the canonical python-chess SAN computed BEFORE the push
+    so it reflects the board state at the time the move was made.
+    """
     san = san.replace("0-0-0", "O-O-O").replace("0-0", "O-O")  # normalize zeros
     try:
         move = board.parse_san(san)
+        validated_san = board.san(move)   # canonical SAN before push
         board.push(move)
-        return move
+        return move, validated_san
     except (chess.IllegalMoveError, chess.InvalidMoveError, chess.AmbiguousMoveError, ValueError) as e:
         warnings.append(f"Move {move_number}{side[0]}: '{san}' — {e}")
-        return None
+        return None, None
 
 
 def _build_pgn(parsed_moves: list[dict]) -> str:

@@ -94,27 +94,38 @@ function ScanScreen({ nav, tournamentId, onGameSaved }) {
     setStep(imageFile ? 'reading' : 'demo-reading');
   }
 
-  // Real reading: fake progress animation while API resolves
+  // Real reading: indeterminate progress while API resolves.
+  // Progress asymptotically approaches 90 % so it never "completes" early —
+  // the bar snaps to 100 % only when the server actually responds.
   React.useEffect(() => {
     if (step !== 'reading') return;
-    const TOTAL = 40;
-    let i = -1;
-    const id = setInterval(async () => {
-      i++;
-      setScannedThrough(i);
-      if (i >= TOTAL - 1) {
+    let cancelled = false;
+    let progress = 0;   // 0–100 virtual percentage
+
+    // Tick every 250 ms: ease toward 90 % but never reach it
+    const id = setInterval(() => {
+      if (cancelled) return;
+      progress = Math.min(90, progress + (90 - progress) * 0.04);
+      setScannedThrough(Math.floor((progress / 100) * OPERA.length));
+    }, 250);
+
+    // Resolve immediately when the server responds (could be 5 s or 120 s)
+    apiPromiseRef.current
+      .then(result => {
+        if (cancelled) return;
         clearInterval(id);
-        try {
-          const result = await apiPromiseRef.current;
-          setApiGame(backendGameToFrontend(result));
-          setStep('review');
-        } catch (e) {
-          setApiError(e.message || 'OCR failed');
-          setStep('error');
-        }
-      }
-    }, 80);
-    return () => clearInterval(id);
+        setScannedThrough(OPERA.length - 1);   // snap to 100 %
+        setApiGame(backendGameToFrontend(result));
+        setTimeout(() => { if (!cancelled) setStep('review'); }, 350);
+      })
+      .catch(e => {
+        if (cancelled) return;
+        clearInterval(id);
+        setApiError(e.message || 'OCR failed');
+        setStep('error');
+      });
+
+    return () => { cancelled = true; clearInterval(id); };
   }, [step]);
 
   // Demo reading: animate through OPERA moves
@@ -154,12 +165,146 @@ function ScanScreen({ nav, tournamentId, onGameSaved }) {
   return null;
 }
 
+// ─── Camera permission bottom sheet ──────────────────────────────────────────
+function CameraPermissionModal({ permState, onAllow, onDismiss }) {
+  const isDenied     = permState === 'denied';
+  const isRequesting = permState === 'requesting';
+  const accentOk  = '#A8D88A';
+  const accentErr = '#FF6B6B';
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 50,
+      background: 'rgba(0,0,0,0.65)',
+      backdropFilter: 'blur(8px)',
+      display: 'flex', alignItems: 'flex-end',
+    }}>
+      <div style={{
+        width: '100%',
+        background: '#1C1D24',
+        borderRadius: '24px 24px 0 0',
+        padding: '28px 24px 44px',
+        boxShadow: '0 -12px 48px rgba(0,0,0,0.7)',
+      }}>
+        {/* Icon bubble */}
+        <div style={{ textAlign: 'center', marginBottom: 20 }}>
+          <div style={{
+            width: 72, height: 72, borderRadius: 20,
+            background: isDenied ? 'rgba(255,107,107,0.12)' : 'rgba(168,216,138,0.12)',
+            border: `1.5px solid ${isDenied ? 'rgba(255,107,107,0.4)' : 'rgba(168,216,138,0.4)'}`,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            {isDenied ? (
+              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                <circle cx="14" cy="14" r="11" stroke={accentErr} strokeWidth="2"/>
+                <path d="M10 10l8 8M18 10l-8 8" stroke={accentErr} strokeWidth="2" strokeLinecap="round"/>
+              </svg>
+            ) : (
+              <svg width="32" height="27" viewBox="0 0 32 27" fill="none">
+                <rect x="2" y="7" width="28" height="18" rx="3.5" stroke={accentOk} strokeWidth="2"/>
+                <circle cx="16" cy="16" r="5.5" stroke={accentOk} strokeWidth="2"/>
+                <path d="M11 7l2.5-5h5l2.5 5" stroke={accentOk} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                <circle cx="25.5" cy="11" r="1.5" fill={accentOk}/>
+              </svg>
+            )}
+          </div>
+        </div>
+
+        <div style={{
+          fontFamily: '"Space Grotesk", sans-serif',
+          fontSize: 19, fontWeight: 700, letterSpacing: -0.3,
+          color: '#fff', textAlign: 'center', marginBottom: 10,
+        }}>
+          {isDenied ? 'Camera Blocked' : '"ChessTourny" Would Like to\nAccess Your Camera'}
+        </div>
+        <div style={{
+          fontFamily: '"Space Grotesk", sans-serif',
+          fontSize: 14, color: 'rgba(255,255,255,0.55)',
+          textAlign: 'center', lineHeight: 1.6,
+          maxWidth: 290, margin: '0 auto 30px',
+        }}>
+          {isDenied
+            ? 'Camera access was denied. Open your browser settings and allow camera access for this site, then try again.'
+            : 'Used to photograph your handwritten score sheet so ChessTourny can read the moves automatically.'}
+        </div>
+
+        {isDenied ? (
+          <div onClick={onDismiss} style={{
+            height: 52, borderRadius: 14,
+            background: 'rgba(255,255,255,0.10)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: '"Space Grotesk", sans-serif', fontSize: 15, fontWeight: 600,
+            color: '#fff', cursor: 'pointer',
+          }}>OK</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div
+              onClick={isRequesting ? undefined : onAllow}
+              style={{
+                height: 52, borderRadius: 14,
+                background: isRequesting ? 'rgba(168,216,138,0.45)' : accentOk,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontFamily: '"Space Grotesk", sans-serif', fontSize: 15, fontWeight: 600,
+                color: '#14151A',
+                cursor: isRequesting ? 'default' : 'pointer',
+                transition: 'background 0.2s',
+              }}
+            >
+              {isRequesting ? 'Requesting access…' : 'Allow Camera'}
+            </div>
+            <div onClick={onDismiss} style={{
+              height: 52, borderRadius: 14,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: '"Space Grotesk", sans-serif', fontSize: 15, fontWeight: 600,
+              color: 'rgba(255,255,255,0.45)', cursor: 'pointer',
+            }}>Don't Allow</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Scan aim screen ──────────────────────────────────────────────────────────
 function ScanAim({ nav, onCapture, onFileSelected }) {
   const fileInputRef = React.useRef(null);
+  const [showPermModal, setShowPermModal] = React.useState(false);
+  const [permState, setPermState]         = React.useState('idle'); // idle | requesting | granted | denied
+
   function handleChange(e) {
     const f = e.target.files && e.target.files[0];
     if (f && onFileSelected) onFileSelected(f);
   }
+
+  async function handleCameraPress() {
+    // No camera API (plain desktop without webcam) → fall back to demo mode
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      onCapture(); return;
+    }
+    // If browser already granted permission, open camera immediately
+    try {
+      const perm = await navigator.permissions.query({ name: 'camera' });
+      if (perm.state === 'granted') {
+        fileInputRef.current && fileInputRef.current.click(); return;
+      }
+    } catch (_) { /* Permissions API unsupported — show prompt anyway */ }
+    // Show the iOS-style permission bottom sheet
+    setPermState('idle');
+    setShowPermModal(true);
+  }
+
+  async function handleGrantCamera() {
+    setPermState('requesting');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      stream.getTracks().forEach(t => t.stop()); // only needed the permission grant
+      setPermState('granted');
+      setShowPermModal(false);
+      setTimeout(() => fileInputRef.current && fileInputRef.current.click(), 100);
+    } catch (_) {
+      setPermState('denied');
+    }
+  }
+
   return (
     <div style={{
       position: 'absolute', inset: 0, background: '#0A0B0E',
@@ -168,6 +313,16 @@ function ScanAim({ nav, onCapture, onFileSelected }) {
       {/* Hidden file input — capture=environment opens rear camera on mobile */}
       <input ref={fileInputRef} type="file" accept="image/*" capture="environment"
         style={{ display: 'none' }} onChange={handleChange} />
+
+      {/* Camera permission bottom sheet */}
+      {showPermModal && (
+        <CameraPermissionModal
+          permState={permState}
+          onAllow={handleGrantCamera}
+          onDismiss={() => setShowPermModal(false)}
+        />
+      )}
+
       <div style={{
         position: 'absolute', top: 56, left: 0, right: 0, zIndex: 10,
         display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -233,7 +388,7 @@ function ScanAim({ nav, onCapture, onFileSelected }) {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '0 36px 56px',
       }}>
-        {/* FILE — opens photo library */}
+        {/* FILE — opens photo library directly (no camera permission needed) */}
         <div onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{
           width: 42, height: 42, borderRadius: 10,
           background: 'rgba(255,255,255,0.10)',
@@ -243,8 +398,8 @@ function ScanAim({ nav, onCapture, onFileSelected }) {
           letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: 700,
           cursor: 'pointer',
         }}>FILE</div>
-        {/* Shutter — demo mode */}
-        <div onClick={onCapture} style={{
+        {/* Shutter — requests camera permission, then opens camera */}
+        <div onClick={handleCameraPress} style={{
           width: 76, height: 76, borderRadius: '50%',
           border: '3px solid #fff', padding: 5,
           cursor: 'pointer',
@@ -255,8 +410,8 @@ function ScanAim({ nav, onCapture, onFileSelected }) {
             transition: 'transform 0.12s',
           }} />
         </div>
-        {/* Camera icon — opens camera directly */}
-        <div onClick={() => fileInputRef.current && fileInputRef.current.click()} style={{
+        {/* Camera icon — requests camera permission, then opens camera */}
+        <div onClick={handleCameraPress} style={{
           width: 42, height: 42, borderRadius: 10,
           background: 'rgba(255,255,255,0.10)',
           backdropFilter: 'blur(20px)',
@@ -559,4 +714,5 @@ function ScanError({ error, nav, onRetry }) {
 Object.assign(window, {
   ScoreSheetPaper, ScanScreen, ScanAim, ScanCapturing,
   ScanReading, ScanReview, ScanError, Field, MoveGrid, CornerBrackets,
+  CameraPermissionModal,
 });

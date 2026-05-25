@@ -22,6 +22,8 @@ chess>=1.10.0
 
 # Image handling
 pillow==11.0.0
+# HEIC/HEIF support — iOS phones shoot in HEIC by default; this lets PIL open them
+pillow-heif>=0.18.0
 
 # File uploads & async I/O
 python-multipart==0.0.12

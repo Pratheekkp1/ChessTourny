@@ -6,7 +6,7 @@
   "liveServer.settings.donotShowInfoMsg": true,
 
   // Open ChessTourny.html by default
-  "liveServer.settings.file": "/frontend/ChessTourny.html",
+  "liveServer.settings.file": "/ChessTourny.html",
 
   // Nice-to-haves
   "editor.formatOnSave": true,
