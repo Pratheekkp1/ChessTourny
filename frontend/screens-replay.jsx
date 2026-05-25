@@ -50,7 +50,7 @@ function ReplayView({ nav, game, moves }) {
   const totalPlies = positions.length;
   const [ply, setPly] = React.useState(0);
   const [playing, setPlaying] = React.useState(false);
-  const [speed] = React.useState(1.0);
+  const [speed, setSpeed] = React.useState(1.0);
   const [flipped, setFlipped] = React.useState(game.black === 'You');
   const [showExportSheet, setShowExportSheet] = React.useState(false);
   const [exportLoading, setExportLoading] = React.useState(false);
@@ -314,34 +314,57 @@ function ReplayView({ nav, game, moves }) {
 
       {/* transport */}
       <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 24px 34px',
         borderTop: '1px solid var(--border)',
         background: 'var(--surface)',
+        paddingBottom: 34,
       }}>
-        <TransportBtn onClick={() => setPly(0)}>
-          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 2v10M12 2L4 7l8 5V2z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" strokeLinejoin="round"/></svg>
-        </TransportBtn>
-        <TransportBtn onClick={() => setPly(p => Math.max(0, p - 1))}>
-          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M10 2L4 7l6 5V2z" fill="currentColor"/></svg>
-        </TransportBtn>
-        <div onClick={() => setPlaying(p => !p)} style={{
-          width: 56, height: 56, borderRadius: 18,
-          background: 'var(--ink)', color: 'var(--paper)',
+        {/* Speed control row */}
+        <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          cursor: 'pointer', boxShadow: 'var(--shadow-2)',
+          gap: 6, padding: '10px 24px 2px',
         }}>
-          {playing
-            ? <svg width="14" height="16" viewBox="0 0 14 16"><rect x="1" y="1" width="4" height="14" rx="1" fill="currentColor"/><rect x="9" y="1" width="4" height="14" rx="1" fill="currentColor"/></svg>
-            : <svg width="14" height="16" viewBox="0 0 14 16" style={{ marginLeft: 2 }}><path d="M2 1.5l11 6.5L2 14.5V1.5z" fill="currentColor"/></svg>
-          }
+          {[0.5, 1.0, 1.5, 2.0].map(s => (
+            <div key={s} onClick={() => setSpeed(s)} style={{
+              padding: '4px 10px', borderRadius: 8,
+              background: speed === s ? 'var(--ink)' : 'var(--surface-2)',
+              border: '1px solid ' + (speed === s ? 'transparent' : 'var(--border)'),
+              color: speed === s ? 'var(--paper)' : 'var(--fg-3)',
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+              cursor: 'pointer', letterSpacing: 0.3,
+              transition: 'all 0.12s',
+            }}>{s === 1 ? '1×' : s + '×'}</div>
+          ))}
         </div>
-        <TransportBtn onClick={() => setPly(p => Math.min(totalPlies - 1, p + 1))}>
-          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 2l6 5-6 5V2z" fill="currentColor"/></svg>
-        </TransportBtn>
-        <TransportBtn onClick={() => setPly(totalPlies - 1)}>
-          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M12 2v10M2 2l8 5-8 5V2z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" strokeLinejoin="round"/></svg>
-        </TransportBtn>
+
+        {/* Transport buttons */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 24px 0',
+        }}>
+          <TransportBtn onClick={() => setPly(0)}>
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 2v10M12 2L4 7l8 5V2z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" strokeLinejoin="round"/></svg>
+          </TransportBtn>
+          <TransportBtn onClick={() => setPly(p => Math.max(0, p - 1))}>
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M10 2L4 7l6 5V2z" fill="currentColor"/></svg>
+          </TransportBtn>
+          <div onClick={() => setPlaying(p => !p)} style={{
+            width: 56, height: 56, borderRadius: 18,
+            background: 'var(--ink)', color: 'var(--paper)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', boxShadow: 'var(--shadow-2)',
+          }}>
+            {playing
+              ? <svg width="14" height="16" viewBox="0 0 14 16"><rect x="1" y="1" width="4" height="14" rx="1" fill="currentColor"/><rect x="9" y="1" width="4" height="14" rx="1" fill="currentColor"/></svg>
+              : <svg width="14" height="16" viewBox="0 0 14 16" style={{ marginLeft: 2 }}><path d="M2 1.5l11 6.5L2 14.5V1.5z" fill="currentColor"/></svg>
+            }
+          </div>
+          <TransportBtn onClick={() => setPly(p => Math.min(totalPlies - 1, p + 1))}>
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 2l6 5-6 5V2z" fill="currentColor"/></svg>
+          </TransportBtn>
+          <TransportBtn onClick={() => setPly(totalPlies - 1)}>
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M12 2v10M2 2l8 5-8 5V2z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" strokeLinejoin="round"/></svg>
+          </TransportBtn>
+        </div>
       </div>
 
       {/* export action sheet */}

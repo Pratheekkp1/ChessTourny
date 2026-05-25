@@ -945,6 +945,19 @@ function TournamentsListScreen({ nav }) {
 function GamesListScreen({ nav }) {
   const [q, setQ] = React.useState('');
   const [filter, setFilter] = React.useState('all'); // all | win | loss | draw
+  const [confirmDelete, setConfirmDelete] = React.useState(null);
+  const [deleting, setDeleting] = React.useState(false);
+
+  async function handleDeleteGame(gameId, backendId) {
+    setDeleting(true);
+    try {
+      if (backendId) await apiDeleteGame(backendId);
+      const idx = GAMES.findIndex(g => g.id === gameId);
+      if (idx !== -1) GAMES.splice(idx, 1);
+    } catch (e) { console.warn('Delete failed:', e); }
+    setConfirmDelete(null);
+    setDeleting(false);
+  }
 
   const filtered = GAMES.filter(g => {
     if (q) {
@@ -971,6 +984,18 @@ function GamesListScreen({ nav }) {
       paddingTop: 56, paddingBottom: 110,
       background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
     }}>
+      {/* Delete confirmation */}
+      {confirmDelete && (
+        <ActionSheet
+          title="Delete this game?"
+          body="The game and its score sheet will be permanently removed."
+          actions={[
+            { label: deleting ? 'Deleting…' : 'Delete game', danger: true, onClick: () => handleDeleteGame(confirmDelete.id, confirmDelete._backendId) },
+          ]}
+          onDismiss={() => setConfirmDelete(null)}
+        />
+      )}
+
       <div style={{ padding: '4px 20px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
         <BackButton onClick={() => nav.back()} />
         <div style={{
@@ -1042,7 +1067,12 @@ function GamesListScreen({ nav }) {
                     padding: '0 2px 5px',
                   }}>{tName} · Rd {g.round}</div>
                 )}
-                <GameCard game={g} onTap={() => nav.go('replay', { id: g.id })} />
+                <SwipeableGameCard
+                  game={g}
+                  onTap={() => nav.go('replay', { id: g.id })}
+                  onDelete={() => setConfirmDelete(g)}
+                  onEdit={() => nav.go('edit-game', { game: g })}
+                />
               </div>
             );
           })

@@ -136,21 +136,24 @@ This is the living feature checklist. Update it as work completes.
 - [x] **Replay: view score sheet** — full-screen overlay showing original scan image via `apiGetGameImageUrl`
 - [x] **Replay: tournament name fix** — safe lookup (no crash if tournament not in local list)
 - [x] **CSS animations** — `fadeInUp`, `fadeIn`, `slideUp` keyframes added to ChessTourny.html
+- [x] **ScanReview: score sheet thumbnail** — object URL preview of uploaded photo + tap-to-fullscreen overlay
+- [x] **ScanReview: OCR warnings** — amber warning card with up to 3 warnings + overflow count
+- [x] **Tournament edit** — `EditTournamentScreen` (name, venue, start/end dates) + `apiUpdateTournament`
+- [x] **Tournament delete** — `ActionSheet` confirmation + `apiDeleteTournament`; also in TournamentScreen ⋮ menu
+- [x] **SwipeableTournamentCard** — swipe-left reveals Edit/Delete in TournamentsListScreen
+- [x] **Replay: speed control** — 0.5×/1×/1.5×/2× chip row above transport buttons
+- [x] **GamesListScreen: swipeable cards** — upgraded to `SwipeableGameCard` with edit/delete
 
 ### 🔲 TODO — ordered by priority
 
 #### Scan improvements
-- [ ] **Score sheet image preview in ScanReview** — show thumbnail of uploaded photo before confirming
-- [ ] **OCR warnings display** — show any OCR warnings from the backend in `ScanReview`
 - [ ] **Retry OCR** — re-upload or re-scan if OCR confidence is low
 - [ ] **Manual move entry** — fallback if OCR fails: tap to select moves from a piece picker
 
 #### Tournament features
-- [ ] **Tournament edit/delete** — swipe or long-press on tournament card; edit name, venue, dates; delete with confirmation
 - [ ] **Round count from backend** — `rounds` field is hardcoded to 5 in `backendTournamentToFrontend`; add to model
 
 #### Replay enhancements
-- [ ] **Speed control UI** — expose the autoplay speed state to a visible slider/picker
 - [ ] **Evaluation bar** — material balance indicator alongside the board
 
 #### Home & general
