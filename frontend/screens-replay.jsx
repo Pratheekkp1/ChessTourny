@@ -144,8 +144,8 @@ function ReplayView({ nav, game, moves }) {
 
   const handleViewScoreSheet = () => {
     setShowExportSheet(false);
-    if (!game._backendId) {
-      showToast('No score sheet available for demo games', false);
+    if (!game._backendId || !game.hasImage) {
+      showToast('No score sheet image for this game', false);
       return;
     }
     setShowImageOverlay(true);
@@ -412,7 +412,7 @@ function ReplayView({ nav, game, moves }) {
                 sub: 'Copy game notation to clipboard',
                 action: handleCopyPGN,
               },
-              ...(game._backendId ? [{
+              ...(game._backendId && game.hasImage ? [{
                 icon: (
                   <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
                     <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" strokeWidth="1.5"/>

@@ -183,6 +183,7 @@ function backendGameToFrontend(g) {
     timeControl: null,
     note: g.ocr_warnings || null,
     event: g.event || null,
+    hasImage: !!g.has_image,
   };
 }
 

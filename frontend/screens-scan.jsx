@@ -692,7 +692,17 @@ function ScanReview({ moves, nav, apiGame, onSaved, imageFile }) {
       </div>
 
       <div style={{ padding: '22px 20px 0' }}>
-        <SectionLabel action="Tap to edit">Moves</SectionLabel>
+        <SectionLabel action={
+          safeMoves.length < 10 && isReal ? (
+            <span
+              style={{ cursor: 'pointer', color: 'var(--fg-3)', textDecoration: 'underline' }}
+              onClick={() => nav.go('manual-moves', {
+                apiGame,
+                tournamentId: apiGame && apiGame.tournament,
+              })}
+            >Enter manually →</span>
+          ) : 'Tap to edit'
+        }>Moves</SectionLabel>
         <MoveGrid moves={safeMoves} />
       </div>
 
