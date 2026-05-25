@@ -173,7 +173,7 @@ function TabBar({ nav, current, userName }) {
           <path d="M3 7h14M3 13h14M7 3v14M13 3v14" stroke="currentColor" strokeWidth="1" opacity="0.5"/>
         </svg>}
       />
-      <TabItem label="Tourneys" active={current === 'tournament'} onClick={() => nav.go('tournament', { id: 't1' })}
+      <TabItem label="Tourneys" active={current === 'tournaments'} onClick={() => nav.go('tournaments')}
         icon={<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
           <path d="M5 3h10v2a4 4 0 01-4 4H9a4 4 0 01-4-4V3z" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"/>
           <path d="M3 4h2v1a3 3 0 003 3M17 4h-2v1a3 3 0 01-3 3M8 13h4M10 9v4M7 17h6M9 13v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -193,12 +193,12 @@ function TabBar({ nav, current, userName }) {
           <path d="M2 11h18" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
         </svg>
       </div>
-      <TabItem label="Stats"
+      <TabItem label="Stats" active={current === 'stats'} onClick={() => nav.go('stats')}
         icon={<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
           <path d="M3 17h14M5 14V8M9 14V4M13 14v-7M17 14v-3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
         </svg>}
       />
-      <TabItem label={userName.split(' ')[0]}
+      <TabItem label={userName.split(' ')[0]} active={current === 'profile'} onClick={() => nav.go('profile')}
         icon={<svg width="20" height="20" viewBox="0 0 20 20" fill="none">
           <circle cx="10" cy="7" r="3.5" stroke="currentColor" strokeWidth="1.6"/>
           <path d="M3 18c0-3.9 3.1-7 7-7s7 3.1 7 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
@@ -417,6 +417,16 @@ function Root() {
     content = <HomeScreen key={dataVersion} nav={nav} today={today} user={liveUser} mode={t.mode} />;
   else if (cur.screen === 'tournament')
     content = <TournamentScreen key={dataVersion} nav={nav} params={cur.params} />;
+  else if (cur.screen === 'tournaments')
+    content = <TournamentsListScreen key={dataVersion} nav={nav} />;
+  else if (cur.screen === 'all-games')
+    content = <GamesListScreen key={dataVersion} nav={nav} />;
+  else if (cur.screen === 'edit-game')
+    content = <EditGameScreen nav={nav} params={cur.params} />;
+  else if (cur.screen === 'stats')
+    content = <StatsScreen key={dataVersion} nav={nav} user={liveUser} />;
+  else if (cur.screen === 'profile')
+    content = <ProfileScreen nav={nav} user={liveUser} t={t} setTweak={setTweak} />;
   else if (cur.screen === 'scan')
     content = (
       <ScanScreen
@@ -458,7 +468,7 @@ function Root() {
             overflow: 'hidden',
           }}>
             {content}
-            {cur.screen !== 'scan' && cur.screen !== 'replay' && <TabBar nav={nav} current={cur.screen} userName={liveUser.name} />}
+            {!['scan', 'replay', 'edit-game'].includes(cur.screen) && <TabBar nav={nav} current={cur.screen} userName={liveUser.name} />}
           </div>
         </IOSDevice>
       </div>
@@ -478,14 +488,457 @@ function Root() {
         </TweakSection>
         <TweakSection label="Jump to screen">
           <TweakButton label="Home" onClick={() => setStack([{ screen: 'home', params: {} }])} />
+          <TweakButton label="All Tournaments" onClick={() => setStack([{ screen: 'tournaments', params: {} }])} />
           <TweakButton label="Tournament: Bayfront Open" onClick={() => setStack([{ screen: 'tournament', params: { id: 't1' } }])} />
+          <TweakButton label="All Games" onClick={() => setStack([{ screen: 'all-games', params: {} }])} />
+          <TweakButton label="Stats" onClick={() => setStack([{ screen: 'stats', params: {} }])} />
+          <TweakButton label="Profile" onClick={() => setStack([{ screen: 'profile', params: {} }])} />
           <TweakButton label="Scan score sheet" onClick={() => setStack([{ screen: 'scan', params: {} }])} />
           <TweakButton label="Replay: Opera Game" onClick={() => setStack([{ screen: 'replay', params: { id: 'g1' } }])} />
           <TweakButton label="New tournament" onClick={() => setStack([{ screen: 'new-tournament', params: {} }])} />
+          <TweakButton label="Edit game (Opera)" onClick={() => setStack([{ screen: 'edit-game', params: { id: 'g1' } }])} />
         </TweakSection>
       </TweaksPanel>
     </div>
   );
 }
+
+// ──────────────────────────────────────────────────────────
+// Stats screen
+// ──────────────────────────────────────────────────────────
+function StatsScreen({ nav, user }) {
+  const [period, setPeriod] = React.useState('all'); // all | month | week
+  const now = new Date();
+
+  function inPeriod(isoDate) {
+    if (period === 'all') return true;
+    const d = parseLocal(isoDate);
+    if (period === 'week') {
+      const cutoff = new Date(now); cutoff.setDate(now.getDate() - 7); return d >= cutoff;
+    }
+    const cutoff = new Date(now.getFullYear(), now.getMonth(), 1); return d >= cutoff;
+  }
+
+  const games = GAMES.filter(g => g.date && inPeriod(g.date));
+  const mine  = games.filter(g => g.white === 'You' || g.black === 'You');
+  const won   = mine.filter(g => (g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You')).length;
+  const lost  = mine.filter(g => (g.result === '0-1' && g.white === 'You') || (g.result === '1-0' && g.black === 'You')).length;
+  const drew  = mine.filter(g => g.result === '½-½').length;
+  const total = mine.length;
+
+  // Opening frequency
+  const openingCounts = {};
+  games.forEach(g => {
+    const eco = (g.eco || '—').split(' — ')[0];
+    openingCounts[eco] = (openingCounts[eco] || 0) + 1;
+  });
+  const topOpenings = Object.entries(openingCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5);
+
+  // Per-tournament breakdown
+  const tourneyMap = {};
+  games.forEach(g => {
+    if (!g.tournament) return;
+    if (!tourneyMap[g.tournament]) tourneyMap[g.tournament] = { won: 0, lost: 0, drew: 0 };
+    const m = tourneyMap[g.tournament];
+    if ((g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You')) m.won++;
+    else if ((g.result === '0-1' && g.white === 'You') || (g.result === '1-0' && g.black === 'You')) m.lost++;
+    else m.drew++;
+  });
+
+  const periodChips = [
+    { key: 'week',  label: '7 days' },
+    { key: 'month', label: 'Month' },
+    { key: 'all',   label: 'All time' },
+  ];
+
+  const barMax = Math.max(won, lost, drew, 1);
+  function Bar({ val, color, label }) {
+    return (
+      <div style={{ flex: 1, textAlign: 'center' }}>
+        <div style={{ height: 80, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+          <div style={{
+            width: 32, borderRadius: '6px 6px 0 0',
+            background: color,
+            height: `${Math.max(4, (val / barMax) * 100)}%`,
+            transition: 'height 0.4s ease',
+          }} />
+        </div>
+        <div style={{
+          fontFamily: 'var(--display)', fontSize: 20, fontWeight: 700,
+          color: 'var(--fg)', marginTop: 4,
+        }}>{val}</div>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)',
+          textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600, marginTop: 2,
+        }}>{label}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{
+      paddingTop: 56, paddingBottom: 110,
+      background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
+    }}>
+      <div style={{ padding: '4px 20px 0' }}>
+        <div style={{
+          fontFamily: 'var(--display)', fontSize: 22, fontWeight: 700, letterSpacing: -0.5,
+        }}>Stats</div>
+        <div style={{
+          fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg-2)', marginTop: 2,
+        }}>{user.name} · {user.federation} {user.rating}</div>
+      </div>
+
+      {/* Period selector */}
+      <div style={{ display: 'flex', gap: 8, padding: '14px 20px 0', overflowX: 'auto', scrollbarWidth: 'none' }}>
+        {periodChips.map(c => (
+          <div key={c.key} onClick={() => setPeriod(c.key)} style={{
+            flexShrink: 0, padding: '5px 16px', borderRadius: 999,
+            background: period === c.key ? 'var(--ink)' : 'var(--surface)',
+            border: '1px solid var(--border)',
+            color: period === c.key ? 'var(--paper)' : 'var(--fg-2)',
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+            cursor: 'pointer', transition: 'background 0.15s',
+          }}>{c.label}</div>
+        ))}
+      </div>
+
+      {/* W/L/D bar chart */}
+      <div style={{ padding: '20px 20px 0' }}>
+        <div style={{
+          background: 'var(--surface)', borderRadius: 16,
+          border: '1px solid var(--border)',
+          padding: '20px 20px 16px',
+          boxShadow: 'var(--shadow-1)',
+        }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+            textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600,
+            marginBottom: 16,
+          }}>Results — {total} game{total !== 1 ? 's' : ''}</div>
+          {total === 0 ? (
+            <div style={{
+              fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg-3)', textAlign: 'center', padding: '20px 0',
+            }}>No games in this period</div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Bar val={won}  color="var(--win)"  label="Won" />
+              <Bar val={lost} color="var(--loss)" label="Lost" />
+              <Bar val={drew} color="var(--draw)" label="Draw" />
+            </div>
+          )}
+          {total > 0 && (
+            <div style={{
+              marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)',
+              display: 'flex', gap: 16,
+              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-2)', fontWeight: 500,
+            }}>
+              <span>Win rate: <strong style={{ color: 'var(--win)' }}>{Math.round((won / total) * 100)}%</strong></span>
+              <span>Score: <strong>{won + drew * 0.5}/{total}</strong></span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Tournament breakdown */}
+      {Object.keys(tourneyMap).length > 0 && (
+        <div style={{ padding: '18px 20px 0' }}>
+          <SectionLabel>By tournament</SectionLabel>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '4px 0 0' }}>
+            {Object.entries(tourneyMap).map(([tid, r]) => {
+              const t = TOURNAMENTS.find(x => x.id === tid);
+              if (!t) return null;
+              const tm = r.won + r.lost + r.drew;
+              return (
+                <div key={tid} onClick={() => nav.go('tournament', { id: tid })} style={{
+                  background: 'var(--surface)', borderRadius: 12,
+                  border: '1px solid var(--border)',
+                  padding: '12px 14px',
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  cursor: 'pointer',
+                }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontFamily: 'var(--display)', fontSize: 15, fontWeight: 600,
+                      color: 'var(--fg)', letterSpacing: -0.2,
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>{t.name}</div>
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+                      marginTop: 3, fontWeight: 600,
+                    }}>{r.won}W · {r.lost}L · {r.drew}D</div>
+                  </div>
+                  <div style={{
+                    fontFamily: 'var(--display)', fontSize: 22, fontWeight: 700,
+                    color: 'var(--fg)', letterSpacing: -0.5,
+                  }}>{r.won + r.drew * 0.5}<span style={{ fontSize: 13, color: 'var(--fg-3)', fontWeight: 500 }}>/{tm}</span></div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Opening frequency */}
+      {topOpenings.length > 0 && (
+        <div style={{ padding: '18px 20px 0' }}>
+          <SectionLabel>Top openings</SectionLabel>
+          <div style={{
+            background: 'var(--surface)', borderRadius: 16,
+            border: '1px solid var(--border)',
+            overflow: 'hidden',
+          }}>
+            {topOpenings.map(([eco, count], i) => (
+              <div key={eco} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '11px 14px',
+                borderBottom: i < topOpenings.length - 1 ? '1px solid var(--border)' : 'none',
+              }}>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700,
+                  color: 'var(--fg-3)', width: 22, textAlign: 'right',
+                }}>{i + 1}</div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--fg)', fontWeight: 600 }}>{eco}</div>
+                </div>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)', fontWeight: 600,
+                }}>{count}×</div>
+                <div style={{
+                  width: 48, height: 5, borderRadius: 3,
+                  background: 'var(--border)',
+                  overflow: 'hidden',
+                }}>
+                  <div style={{
+                    height: '100%', borderRadius: 3,
+                    background: 'var(--ink)',
+                    width: `${(count / topOpenings[0][1]) * 100}%`,
+                  }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// Profile / settings screen
+// ──────────────────────────────────────────────────────────
+function ProfileScreen({ nav, user, t, setTweak }) {
+  const initials = user.name.split(' ').map(s => s[0]).slice(0, 2).join('');
+  const [name, setName] = React.useState(user.name);
+  const [editing, setEditing] = React.useState(false);
+
+  function saveNameEdit() {
+    setTweak('userName', name.trim() || user.name);
+    setEditing(false);
+  }
+
+  const THEMES = [
+    { key: 'modern', label: 'Modern', sub: 'Clean sans-serif' },
+    { key: 'paper',  label: 'Paper',  sub: 'Serif, classic feel' },
+  ];
+  const MODES = [
+    { key: 'light', label: 'Light' },
+    { key: 'dark',  label: 'Dark' },
+  ];
+
+  return (
+    <div style={{
+      paddingTop: 56, paddingBottom: 110,
+      background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
+    }}>
+      {/* Avatar */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        padding: '20px 20px 0',
+      }}>
+        <div style={{
+          width: 72, height: 72, borderRadius: 20,
+          background: 'var(--ink)', color: 'var(--paper)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'var(--display)', fontSize: 24, fontWeight: 700,
+          letterSpacing: 0.5, boxShadow: 'var(--shadow-2)',
+        }}>{initials}</div>
+
+        {editing ? (
+          <div style={{ display: 'flex', gap: 8, marginTop: 12, alignItems: 'center' }}>
+            <input
+              value={name} onChange={e => setName(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && saveNameEdit()}
+              autoFocus
+              style={{
+                height: 36, borderRadius: 8, border: '1px solid var(--border)',
+                background: 'var(--surface)', padding: '0 12px',
+                fontFamily: 'var(--display)', fontSize: 16, fontWeight: 600,
+                color: 'var(--fg)', outline: 'none', textAlign: 'center',
+              }}
+            />
+            <div onClick={saveNameEdit} style={{
+              padding: '6px 12px', borderRadius: 8,
+              background: 'var(--ink)', color: 'var(--paper)',
+              fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 700, cursor: 'pointer',
+            }}>Save</div>
+          </div>
+        ) : (
+          <div onClick={() => setEditing(true)} style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            marginTop: 12, cursor: 'pointer',
+          }}>
+            <div style={{
+              fontFamily: 'var(--display)', fontSize: 20, fontWeight: 700,
+              color: 'var(--fg)', letterSpacing: -0.3,
+            }}>{user.name}</div>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M1 9.5l1.5-1.5 6-6 1.5 1.5-6 6L1 9.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </div>
+        )}
+
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)',
+          marginTop: 4, letterSpacing: 0.4,
+        }}>{user.federation} · Rating {user.rating}</div>
+      </div>
+
+      {/* Stats row */}
+      <div style={{ display: 'flex', gap: 8, padding: '20px 20px 0' }}>
+        <StatTile value={GAMES.length} label="Total games" />
+        <StatTile value={TOURNAMENTS.length} label="Tournaments" />
+        <StatTile value={(() => {
+          const mine = GAMES.filter(g => g.white === 'You' || g.black === 'You');
+          const won = mine.filter(g => (g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You')).length;
+          return mine.length > 0 ? Math.round((won / mine.length) * 100) + '%' : '—';
+        })()} label="Win rate" accent="var(--win)" />
+      </div>
+
+      {/* Appearance */}
+      <div style={{ padding: '22px 20px 0' }}>
+        <SectionLabel>Appearance</SectionLabel>
+        <div style={{
+          background: 'var(--surface)', borderRadius: 16,
+          border: '1px solid var(--border)', overflow: 'hidden',
+        }}>
+          {/* Mode */}
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)' }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+              textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600, marginBottom: 10,
+            }}>Mode</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {MODES.map(m => (
+                <div key={m.key} onClick={() => setTweak('mode', m.key)} style={{
+                  flex: 1, height: 38, borderRadius: 10,
+                  border: `1.5px solid ${t.mode === m.key ? 'var(--ink)' : 'var(--border)'}`,
+                  background: t.mode === m.key ? 'var(--ink)' : 'transparent',
+                  color: t.mode === m.key ? 'var(--paper)' : 'var(--fg-2)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}>{m.label}</div>
+              ))}
+            </div>
+          </div>
+          {/* Theme */}
+          <div style={{ padding: '14px 16px' }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+              textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600, marginBottom: 10,
+            }}>Theme</div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {THEMES.map(th => (
+                <div key={th.key} onClick={() => setTweak('theme', th.key)} style={{
+                  flex: 1, padding: '10px 14px', borderRadius: 12,
+                  border: `1.5px solid ${t.theme === th.key ? 'var(--ink)' : 'var(--border)'}`,
+                  background: t.theme === th.key ? 'var(--surface-2)' : 'transparent',
+                  cursor: 'pointer', transition: 'all 0.15s',
+                }}>
+                  <div style={{
+                    fontFamily: 'var(--display)', fontSize: 14, fontWeight: 600,
+                    color: t.theme === th.key ? 'var(--fg)' : 'var(--fg-2)',
+                  }}>{th.label}</div>
+                  <div style={{
+                    fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--fg-3)', marginTop: 2,
+                  }}>{th.sub}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* OCR backend */}
+      <div style={{ padding: '18px 20px 0' }}>
+        <SectionLabel>Scan settings</SectionLabel>
+        <div style={{
+          background: 'var(--surface)', borderRadius: 16,
+          border: '1px solid var(--border)',
+          padding: '14px 16px',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            marginBottom: 6,
+          }}>
+            <div style={{ fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 500, color: 'var(--fg)' }}>
+              Handwriting model
+            </div>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+              padding: '3px 8px', borderRadius: 6,
+              background: 'var(--surface-2)', color: 'var(--fg-2)',
+              letterSpacing: 0.5,
+            }}>TrOCR</div>
+          </div>
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--fg-3)', lineHeight: 1.5,
+          }}>
+            Microsoft TrOCR (local, ~300 MB). Set OCR_BACKEND=ollama in .env for higher accuracy with a local vision model.
+          </div>
+        </div>
+      </div>
+
+      {/* Data */}
+      <div style={{ padding: '18px 20px 0' }}>
+        <SectionLabel>Data</SectionLabel>
+        <div style={{
+          background: 'var(--surface)', borderRadius: 16,
+          border: '1px solid var(--border)', overflow: 'hidden',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '14px 16px', borderBottom: '1px solid var(--border)',
+          }}>
+            <div style={{ fontFamily: 'var(--sans)', fontSize: 14, color: 'var(--fg)' }}>Backend</div>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 11, color: window.LIVE_DATA_LOADED ? 'var(--win)' : 'var(--fg-3)',
+              fontWeight: 600,
+            }}>{window.LIVE_DATA_LOADED ? 'Connected' : 'Mock data'}</div>
+          </div>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '14px 16px',
+          }}>
+            <div style={{ fontFamily: 'var(--sans)', fontSize: 14, color: 'var(--fg)' }}>API endpoint</div>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)', fontWeight: 500,
+            }}>localhost:8000</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Expose shared UI primitives so later-loaded screens-*.jsx files can reference them
+// (app.jsx loads last, but React renders after ALL scripts execute, so this is safe)
+Object.assign(window, {
+  LiveFormField, FormField, BackButton: window.BackButton || BackButton,
+  StatsScreen, ProfileScreen,
+});
 
 ReactDOM.createRoot(document.getElementById('root')).render(<Root />);

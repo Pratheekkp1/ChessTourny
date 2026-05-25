@@ -150,13 +150,14 @@ function ScanScreen({ nav, tournamentId, onGameSaved }) {
   if (step === 'capturing') return <ScanCapturing onDone={onCaptureDone} />;
   if (step === 'reading') return <ScanReading moves={OPERA} scannedThrough={Math.floor(scannedThrough / 40 * OPERA.length)} label="Analyzing handwriting…" />;
   if (step === 'demo-reading') return <ScanReading moves={OPERA} scannedThrough={demoScanned} />;
-  if (step === 'demo-review') return <ScanReview moves={OPERA} nav={nav} apiGame={null} onSaved={null} />;
+  if (step === 'demo-review') return <ScanReview moves={OPERA} nav={nav} apiGame={null} onSaved={null} imageFile={null} />;
   if (step === 'review') return (
     <ScanReview
       moves={apiGame && apiGame.moves && apiGame.moves.length > 0 ? apiGame.moves.filter(Boolean) : OPERA}
       nav={nav}
       apiGame={apiGame}
       onSaved={onGameSaved}
+      imageFile={imageFile}
     />
   );
   if (step === 'error') return (
@@ -501,11 +502,23 @@ function ScanReading({ moves, scannedThrough, label }) {
   );
 }
 
-function ScanReview({ moves, nav, apiGame, onSaved }) {
+function ScanReview({ moves, nav, apiGame, onSaved, imageFile }) {
   const safeMoves = (moves || []).filter(Boolean);
   const positions = React.useMemo(() => computePositions(safeMoves).positions, [safeMoves.length]);
   const finalPos = positions[positions.length - 1];
   const [saving, setSaving] = React.useState(false);
+  const [showImageOverlay, setShowImageOverlay] = React.useState(false);
+
+  // Create a local object URL for the uploaded photo
+  const imageUrl = React.useMemo(() => {
+    if (!imageFile) return null;
+    try { return URL.createObjectURL(imageFile); } catch (_) { return null; }
+  }, [imageFile]);
+
+  // Revoke the object URL when the component unmounts to avoid memory leaks
+  React.useEffect(() => {
+    return () => { if (imageUrl) URL.revokeObjectURL(imageUrl); };
+  }, [imageUrl]);
 
   const isReal = !!apiGame;
   const whiteName  = isReal ? (apiGame.white || 'Unknown') : 'Marcus Hale';
@@ -513,6 +526,13 @@ function ScanReview({ moves, nav, apiGame, onSaved }) {
   const resultStr  = isReal ? (apiGame.result || '?') : '1 – 0';
   const event      = isReal ? (apiGame.event || '—') : 'Bayfront Open · Rd 3';
   const gameDate   = isReal ? (apiGame.date || '—') : 'May 22, 2026';
+
+  // Parse OCR warnings from the note field (newline-separated)
+  const warnings = isReal && apiGame.note
+    ? apiGame.note.split('\n').map(w => w.trim()).filter(Boolean)
+    : [];
+  // Separate user notes from OCR warnings
+  const ocrWarnings = warnings.filter(w => !w.startsWith('[user note]'));
 
   async function handleSave() {
     if (!isReal) { nav.go('replay', { id: 'g1' }); return; }
@@ -540,7 +560,7 @@ function ScanReview({ moves, nav, apiGame, onSaved }) {
           letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 700,
         }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--win)' }} />
-          {isReal ? '97% match' : '99% match'}
+          {isReal ? `${safeMoves.length} plies` : '99% match'}
         </div>
         <div style={{ width: 36 }} />
       </div>
@@ -555,13 +575,87 @@ function ScanReview({ moves, nav, apiGame, onSaved }) {
         }}>{safeMoves.length} plies recognized. Tap any move to correct.</div>
       </div>
 
-      <div style={{ display: 'flex', gap: 14, padding: '18px 20px 0', alignItems: 'flex-start' }}>
+      {/* Score sheet thumbnail (only if real image was uploaded) */}
+      {imageUrl && (
+        <div
+          onClick={() => setShowImageOverlay(true)}
+          style={{
+            margin: '14px 20px 0', borderRadius: 12, overflow: 'hidden',
+            border: '1px solid var(--border)',
+            position: 'relative', cursor: 'pointer',
+            maxHeight: 120,
+          }}
+        >
+          <img
+            src={imageUrl}
+            alt="Score sheet"
+            style={{ width: '100%', objectFit: 'cover', objectPosition: 'top', display: 'block' }}
+          />
+          {/* Overlay gradient + label */}
+          <div style={{
+            position: 'absolute', inset: 0,
+            background: 'linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 50%)',
+            display: 'flex', alignItems: 'flex-end',
+            padding: '10px 14px',
+          }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: '#fff',
+              letterSpacing: 0.6, textTransform: 'uppercase', fontWeight: 700,
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}>
+              <svg width="12" height="10" viewBox="0 0 12 10" fill="none">
+                <rect x="1" y="2" width="10" height="7" rx="1.5" stroke="white" strokeWidth="1.3"/>
+                <circle cx="6" cy="5.5" r="2" stroke="white" strokeWidth="1.3"/>
+                <path d="M3.5 2L4.5 0.5h3L7.5 2" stroke="white" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              View score sheet
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OCR warnings */}
+      {ocrWarnings.length > 0 && (
+        <div style={{
+          margin: '12px 20px 0',
+          background: 'rgba(255, 190, 60, 0.08)',
+          border: '1px solid rgba(255, 190, 60, 0.3)',
+          borderRadius: 10, padding: '10px 14px',
+        }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 9, color: '#FFBE3C',
+            letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: 700,
+            marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M5 1L9 9H1L5 1z" stroke="#FFBE3C" strokeWidth="1.2" strokeLinejoin="round"/>
+              <path d="M5 4v2.5" stroke="#FFBE3C" strokeWidth="1.2" strokeLinecap="round"/>
+              <circle cx="5" cy="8" r="0.5" fill="#FFBE3C"/>
+            </svg>
+            OCR warnings ({ocrWarnings.length})
+          </div>
+          {ocrWarnings.slice(0, 3).map((w, i) => (
+            <div key={i} style={{
+              fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--fg-2)',
+              lineHeight: 1.5, marginTop: i > 0 ? 4 : 0,
+            }}>· {w}</div>
+          ))}
+          {ocrWarnings.length > 3 && (
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+              marginTop: 4,
+            }}>+{ocrWarnings.length - 3} more</div>
+          )}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 14, padding: '14px 20px 0', alignItems: 'flex-start' }}>
         <div style={{
           flexShrink: 0, padding: 4, borderRadius: 8,
           background: 'var(--surface)', border: '1px solid var(--border)',
           boxShadow: 'var(--shadow-1)',
         }}>
-          <ChessBoard position={finalPos} size={128} showCoords={false} />
+          <ChessBoard position={finalPos} size={imageUrl ? 100 : 128} showCoords={false} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <Field label="White" value={whiteName} />
@@ -606,6 +700,57 @@ function ScanReview({ moves, nav, apiGame, onSaved }) {
           </svg>}
         </div>
       </div>
+
+      {/* Full-screen score sheet image overlay */}
+      {showImageOverlay && imageUrl && (
+        <div
+          onClick={() => setShowImageOverlay(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 200,
+            background: 'rgba(0,0,0,0.94)',
+            display: 'flex', flexDirection: 'column',
+          }}
+        >
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '54px 20px 16px',
+          }}>
+            <div style={{
+              fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600, color: '#fff',
+            }}>Score Sheet</div>
+            <div
+              onClick={() => setShowImageOverlay(false)}
+              style={{
+                width: 32, height: 32, borderRadius: 16,
+                background: 'rgba(255,255,255,0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+            </div>
+          </div>
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              flex: 1, overflow: 'auto', display: 'flex',
+              alignItems: 'flex-start', justifyContent: 'center',
+              padding: '0 12px 40px',
+            }}
+          >
+            <img
+              src={imageUrl}
+              alt="Score sheet"
+              style={{
+                maxWidth: '100%', borderRadius: 12,
+                boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
+              }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

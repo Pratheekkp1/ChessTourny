@@ -303,11 +303,39 @@ function StatTile({ value, label, accent }) {
 }
 
 // ──────────────────────────────────────────────────────────
+// Computed stats helpers
+// ──────────────────────────────────────────────────────────
+function computeUserStats(games, userName) {
+  let wins = 0, losses = 0, draws = 0;
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  let gamesThisMonth = 0;
+
+  for (const g of games) {
+    if (!g.date) continue;
+    const youWhite = (g.white === 'You' || g.white === userName);
+    const youBlack = (g.black === 'You' || g.black === userName);
+    if (!youWhite && !youBlack) continue;
+
+    const gDate = parseLocal(g.date);
+    if (gDate >= monthStart) gamesThisMonth++;
+
+    if (g.result === '1-0') { youWhite ? wins++ : losses++; }
+    else if (g.result === '0-1') { youBlack ? wins++ : losses++; }
+    else if (g.result === '½-½' || g.result === '1/2-1/2') draws++;
+  }
+  return { wins, losses, draws, gamesThisMonth, total: wins + losses + draws };
+}
+
+// ──────────────────────────────────────────────────────────
 // Home screen
 // ──────────────────────────────────────────────────────────
 function HomeScreen({ nav, today, user, mode }) {
   const tournaments = TOURNAMENTS;
   const recentGames = GAMES.slice(0, 4);
+  const stats = computeUserStats(GAMES, user.name);
+  const wld = stats.total > 0 ? `${stats.wins}–${stats.losses}–${stats.draws}` : '—';
+  const winPct = stats.total > 0 ? Math.round((stats.wins / stats.total) * 100) + '%' : '—';
 
   return (
     <div style={{
@@ -321,9 +349,9 @@ function HomeScreen({ nav, today, user, mode }) {
         display: 'flex', gap: 8,
         padding: '20px 20px 4px',
       }}>
-        <StatTile value="14" label="Games / month" />
-        <StatTile value="8–4–2" label="W–L–D" />
-        <StatTile value="74%" label="Accuracy" accent="var(--win)" />
+        <StatTile value={stats.gamesThisMonth || GAMES.length} label="Games / month" />
+        <StatTile value={wld} label="W–L–D" />
+        <StatTile value={winPct} label="Win rate" accent="var(--win)" />
       </div>
 
       <div style={{ marginTop: 22 }}>
@@ -336,7 +364,7 @@ function HomeScreen({ nav, today, user, mode }) {
             <TournamentCard key={t.id} tournament={t} onTap={() => nav.go('tournament', { id: t.id })} />
           ))}
           <div onClick={() => nav.go('new-tournament')} style={{
-            flexShrink: 0, width: 96,
+            flexShrink: 0, width: 96, minHeight: 130,
             border: '1px dashed var(--border-strong)',
             borderRadius: 16,
             background: 'transparent',
@@ -360,16 +388,25 @@ function HomeScreen({ nav, today, user, mode }) {
         </div>
       </div>
 
-      <div style={{ marginTop: 4 }}>
-        <SectionLabel action="View all">Recent games</SectionLabel>
-        <div style={{
-          display: 'flex', flexDirection: 'column', gap: 10,
-          padding: '0 20px',
-        }}>
-          {recentGames.map(g => (
-            <GameCard key={g.id} game={g} onTap={() => nav.go('replay', { id: g.id })} />
-          ))}
-        </div>
+      <div style={{ marginTop: 4, paddingBottom: 20 }}>
+        <SectionLabel action={
+          <span style={{ cursor: 'pointer' }} onClick={() => nav.go('all-games')}>View all →</span>
+        }>Recent games</SectionLabel>
+        {recentGames.length === 0 ? (
+          <EmptyState
+            icon="♟"
+            title="No games yet"
+            body="Scan a score sheet to record your first game."
+            action="Scan now"
+            onAction={() => nav.go('scan')}
+          />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: '0 20px' }}>
+            {recentGames.map(g => (
+              <GameCard key={g.id} game={g} onTap={() => nav.go('replay', { id: g.id })} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -381,25 +418,68 @@ function HomeScreen({ nav, today, user, mode }) {
 function TournamentScreen({ nav, params }) {
   const t = TOURNAMENTS.find(x => x.id === params.id);
   const games = GAMES.filter(g => g.tournament === params.id);
-  if (!t) return null;
+  const [confirmDelete, setConfirmDelete] = React.useState(null); // gameId to delete
+  const [deleting, setDeleting] = React.useState(false);
+  if (!t) return (
+    <div style={{ padding: 40, color: 'var(--fg-3)', fontFamily: 'var(--sans)', fontSize: 14 }}>
+      Tournament not found.
+    </div>
+  );
 
-  const rounds = Array.from({ length: t.rounds }, (_, i) => i + 1);
+  // Compute real standing from scanned games
+  const youGames = games.filter(g => g.white === 'You' || g.black === 'You');
+  const won  = youGames.filter(g => (g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You')).length;
+  const drew = youGames.filter(g => g.result === '½-½').length;
+  const pts  = won + drew * 0.5;
+  const standing = youGames.length > 0 ? `${pts} / ${youGames.length}` : (t.standing || '—');
+
+  // Group games by round; also collect no-round games
   const gamesByRound = {};
-  games.forEach(g => { if (g.round) gamesByRound[g.round] = g; });
+  const noRoundGames = [];
+  games.forEach(g => {
+    if (g.round) gamesByRound[g.round] = g;
+    else noRoundGames.push(g);
+  });
 
-  const colorMap = {
-    walnut: 'var(--walnut)',
-    moss:   'var(--moss)',
-    ink:    'var(--ink)',
-    brick:  'var(--brick)',
-  };
+  // Determine rounds to display
+  const roundNums = t.rounds
+    ? Array.from({ length: t.rounds }, (_, i) => i + 1)
+    : Object.keys(gamesByRound).map(Number).sort((a, b) => a - b);
+
+  const colorMap = { walnut: 'var(--walnut)', moss: 'var(--moss)', ink: 'var(--ink)', brick: 'var(--brick)' };
   const accent = colorMap[t.color] || 'var(--walnut)';
+
+  async function handleDeleteGame(gameId, backendId) {
+    setDeleting(true);
+    try {
+      if (backendId) await apiDeleteGame(backendId);
+      const idx = GAMES.findIndex(g => g.id === gameId);
+      if (idx !== -1) GAMES.splice(idx, 1);
+    } catch (e) { console.warn('Delete failed:', e); }
+    setConfirmDelete(null);
+    setDeleting(false);
+    // Force re-render by triggering nav refresh
+    nav.go('tournament', { id: params.id });
+    nav.back();
+  }
 
   return (
     <div style={{
-      paddingTop: 56, paddingBottom: 100,
+      paddingTop: 56, paddingBottom: 110,
       background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
     }}>
+      {/* Confirm delete sheet */}
+      {confirmDelete && (
+        <ActionSheet
+          title="Delete this game?"
+          body="This will permanently remove the game and its score sheet image."
+          actions={[
+            { label: deleting ? 'Deleting…' : 'Delete game', danger: true, onClick: () => handleDeleteGame(confirmDelete.id, confirmDelete._backendId) },
+          ]}
+          onDismiss={() => setConfirmDelete(null)}
+        />
+      )}
+
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '4px 20px 0',
@@ -420,7 +500,7 @@ function TournamentScreen({ nav, params }) {
           background: accent, color: '#fff',
           letterSpacing: 0.8, textTransform: 'uppercase',
           marginBottom: 10, whiteSpace: 'nowrap',
-        }}>{t.place} place</div>
+        }}>{t.place || (youGames.length > 0 ? `${won}W ${drew}D` : 'In progress')}</div>
         <div style={{
           fontFamily: 'var(--display)', fontSize: 32, lineHeight: 1.05,
           color: 'var(--fg)', letterSpacing: -1, fontWeight: 700,
@@ -428,67 +508,624 @@ function TournamentScreen({ nav, params }) {
         <div style={{
           fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg-2)',
           marginTop: 6,
-        }}>{t.venue} · {formatDate(t.startDate)} – {formatDate(t.endDate)}</div>
+        }}>{t.venue}{t.venue && ' · '}{formatDate(t.startDate)} – {formatDate(t.endDate)}</div>
 
-        {/* stat tiles */}
-        <div style={{
-          display: 'flex', gap: 8, marginTop: 18,
-        }}>
-          <StatTile value={t.standing} label="Standing" />
-          <StatTile value={t.games + '/' + t.rounds} label="Played" />
-          <StatTile value="—" label="Perf rating" />
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <StatTile value={standing} label="Standing" />
+          <StatTile value={games.length + (t.rounds ? '/' + t.rounds : '')} label="Played" />
+          <StatTile value={youGames.length > 0 ? Math.round((won / youGames.length) * 100) + '%' : '—'} label="Win rate" />
         </div>
       </div>
 
       <div style={{ padding: '24px 20px 0' }}>
-        <SectionLabel action={t.games + ' scanned'}>Rounds</SectionLabel>
+        <SectionLabel action={games.length + ' scanned'}>Rounds</SectionLabel>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {rounds.map(r => {
+          {roundNums.map(r => {
             const g = gamesByRound[r];
             return (
               <div key={r}>
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6,
-                }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
                   <span style={{
                     fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
-                    textTransform: 'uppercase', letterSpacing: 0.8,
-                    whiteSpace: 'nowrap', fontWeight: 600,
+                    textTransform: 'uppercase', letterSpacing: 0.8, whiteSpace: 'nowrap', fontWeight: 600,
                   }}>Round {r}</span>
                   <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                 </div>
-                {g
-                  ? <GameCard game={g} onTap={() => nav.go('replay', { id: g.id })} />
-                  : <div style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      padding: '14px 14px',
-                      border: '1px dashed var(--border-strong)',
-                      borderRadius: 14,
-                      color: 'var(--fg-3)',
-                    }}>
-                      <span style={{
-                        fontFamily: 'var(--sans)', fontSize: 13,
-                      }}>Not yet scanned</span>
-                      <div onClick={() => nav.go('scan')} style={{
-                        fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
-                        padding: '4px 10px', borderRadius: 6,
-                        background: 'var(--ink)', color: 'var(--paper)',
-                        letterSpacing: 0.6, textTransform: 'uppercase',
-                        cursor: 'pointer',
-                      }}>Scan</div>
-                    </div>
-                }
+                {g ? (
+                  <SwipeableGameCard
+                    game={g}
+                    onTap={() => nav.go('replay', { id: g.id })}
+                    onDelete={() => setConfirmDelete(g)}
+                    onEdit={() => nav.go('edit-game', { game: g })}
+                  />
+                ) : (
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    padding: '14px 16px',
+                    border: '1px dashed var(--border-strong)',
+                    borderRadius: 14, color: 'var(--fg-3)',
+                  }}>
+                    <span style={{ fontFamily: 'var(--sans)', fontSize: 13 }}>Not yet scanned</span>
+                    <div onClick={() => nav.go('scan', { tournamentId: t.id })} style={{
+                      fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+                      padding: '4px 10px', borderRadius: 6,
+                      background: 'var(--ink)', color: 'var(--paper)',
+                      letterSpacing: 0.6, textTransform: 'uppercase', cursor: 'pointer',
+                    }}>Scan</div>
+                  </div>
+                )}
               </div>
             );
           })}
+          {/* Games with no round number */}
+          {noRoundGames.length > 0 && (
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <span style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+                  textTransform: 'uppercase', letterSpacing: 0.8, whiteSpace: 'nowrap', fontWeight: 600,
+                }}>Other games</span>
+                <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+              </div>
+              {noRoundGames.map(g => (
+                <div key={g.id} style={{ marginBottom: 10 }}>
+                  <SwipeableGameCard
+                    game={g}
+                    onTap={() => nav.go('replay', { id: g.id })}
+                    onDelete={() => setConfirmDelete(g)}
+                    onEdit={() => nav.go('edit-game', { game: g })}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          {/* Always offer to scan an additional game */}
+          <div onClick={() => nav.go('scan', { tournamentId: t.id })} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+            padding: '16px', marginTop: 4,
+            border: '1px dashed var(--border)',
+            borderRadius: 14, color: 'var(--fg-3)', cursor: 'pointer',
+          }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 3v10M3 8h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
+            </svg>
+            <span style={{ fontFamily: 'var(--sans)', fontSize: 13, fontWeight: 500 }}>Add another game</span>
+          </div>
         </div>
       </div>
     </div>
   );
 }
 
+// ──────────────────────────────────────────────────────────
+// Swipeable game card (shows edit/delete actions)
+// ──────────────────────────────────────────────────────────
+function SwipeableGameCard({ game, onTap, onDelete, onEdit }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div style={{ position: 'relative', overflow: 'hidden', borderRadius: 14 }}>
+      {/* Slide-out actions */}
+      <div style={{
+        position: 'absolute', right: 0, top: 0, bottom: 0,
+        display: 'flex', alignItems: 'stretch',
+        transform: open ? 'translateX(0)' : 'translateX(100%)',
+        transition: 'transform 0.22s ease',
+        zIndex: 1,
+      }}>
+        <div onClick={onEdit} style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 64, background: 'var(--ink)', color: 'var(--paper)',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+          textTransform: 'uppercase', letterSpacing: 0.5, cursor: 'pointer', gap: 4,
+          flexDirection: 'column',
+        }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 10.5l1.5-1.5 7-7 1.5 1.5-7 7L2 10.5z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Edit
+        </div>
+        <div onClick={onDelete} style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 64, background: 'var(--loss)', color: '#fff',
+          fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
+          textTransform: 'uppercase', letterSpacing: 0.5, cursor: 'pointer', gap: 4,
+          flexDirection: 'column',
+        }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 3.5h10M5 3.5V2h4v1.5M5.5 6v4.5M8.5 6v4.5M3.5 3.5l.5 8h6l.5-8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Delete
+        </div>
+      </div>
+
+      {/* The card itself — slides left to reveal actions */}
+      <div
+        style={{ transform: open ? 'translateX(-128px)' : 'translateX(0)', transition: 'transform 0.22s ease', position: 'relative', zIndex: 2 }}
+        onPointerDown={(e) => {
+          const startX = e.clientX;
+          const onUp = (eu) => {
+            const dx = eu.clientX - startX;
+            if (dx < -40) setOpen(true);
+            else if (dx > 20) setOpen(false);
+            document.removeEventListener('pointerup', onUp);
+          };
+          document.addEventListener('pointerup', onUp);
+        }}
+      >
+        <GameCard game={game} onTap={open ? () => setOpen(false) : onTap} />
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// All Tournaments list screen
+// ──────────────────────────────────────────────────────────
+function TournamentsListScreen({ nav }) {
+  const [q, setQ] = React.useState('');
+  const filtered = TOURNAMENTS.filter(t =>
+    !q || t.name.toLowerCase().includes(q.toLowerCase()) || (t.venue || '').toLowerCase().includes(q.toLowerCase())
+  );
+
+  return (
+    <div style={{
+      paddingTop: 56, paddingBottom: 110,
+      background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
+    }}>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '4px 20px 0',
+      }}>
+        <div style={{
+          fontFamily: 'var(--display)', fontSize: 22, fontWeight: 700,
+          letterSpacing: -0.5, color: 'var(--fg)',
+        }}>Tournaments</div>
+        <div onClick={() => nav.go('new-tournament')} style={{
+          width: 36, height: 36, borderRadius: 10,
+          background: 'var(--ink)', color: 'var(--paper)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer',
+          boxShadow: 'var(--shadow-2)',
+        }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+          </svg>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div style={{ padding: '14px 20px 0' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 12, padding: '0 14px', height: 42,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: 'var(--fg-3)', flexShrink: 0 }}>
+            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M10 10l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          <input
+            value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Search tournaments…"
+            style={{
+              flex: 1, border: 'none', background: 'transparent',
+              fontFamily: 'var(--sans)', fontSize: 14, color: 'var(--fg)',
+              outline: 'none',
+            }}
+          />
+          {q && <div onClick={() => setQ('')} style={{ color: 'var(--fg-3)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</div>}
+        </div>
+      </div>
+
+      <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon="🏆"
+            title={q ? 'No matches' : 'No tournaments yet'}
+            body={q ? 'Try a different search.' : 'Create a tournament to group your games.'}
+            action={q ? null : 'New tournament'}
+            onAction={q ? null : () => nav.go('new-tournament')}
+          />
+        ) : (
+          filtered.map(t => {
+            const tGames = GAMES.filter(g => g.tournament === t.id);
+            const won = tGames.filter(g =>
+              (g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You')
+            ).length;
+            const drew = tGames.filter(g => g.result === '½-½').length;
+            const colorMap = { walnut: 'var(--walnut)', moss: 'var(--moss)', ink: 'var(--ink)', brick: 'var(--brick)' };
+            const accent = colorMap[t.color] || 'var(--walnut)';
+            return (
+              <div key={t.id} onClick={() => nav.go('tournament', { id: t.id })} style={{
+                background: 'var(--surface)', borderRadius: 16,
+                border: '1px solid var(--border)',
+                boxShadow: 'var(--shadow-1)',
+                overflow: 'hidden', cursor: 'pointer',
+              }}>
+                <div style={{
+                  background: accent, padding: '8px 14px',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <span style={{
+                    fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+                    color: '#fff', letterSpacing: 1, textTransform: 'uppercase',
+                  }}>{tGames.length} game{tGames.length !== 1 ? 's' : ''} scanned</span>
+                  {t.place && t.place !== '—' && (
+                    <span style={{
+                      fontFamily: 'var(--display)', fontSize: 11, fontWeight: 700, color: '#fff',
+                    }}>{t.place}</span>
+                  )}
+                </div>
+                <div style={{ padding: '12px 14px' }}>
+                  <div style={{
+                    fontFamily: 'var(--display)', fontSize: 18, fontWeight: 600,
+                    color: 'var(--fg)', letterSpacing: -0.3,
+                  }}>{t.name}</div>
+                  <div style={{
+                    fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--fg-2)', marginTop: 2,
+                  }}>{t.venue || 'No venue'} · {formatDate(t.startDate)}</div>
+                  {tGames.length > 0 && (
+                    <div style={{
+                      display: 'flex', gap: 10, marginTop: 10,
+                      fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)', fontWeight: 600,
+                    }}>
+                      <span style={{ color: 'var(--win)' }}>{won}W</span>
+                      <span style={{ color: 'var(--loss)' }}>{tGames.length - won - drew}L</span>
+                      <span style={{ color: 'var(--draw)' }}>{drew}D</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// All Games list screen
+// ──────────────────────────────────────────────────────────
+function GamesListScreen({ nav }) {
+  const [q, setQ] = React.useState('');
+  const [filter, setFilter] = React.useState('all'); // all | win | loss | draw
+
+  const filtered = GAMES.filter(g => {
+    if (q) {
+      const search = q.toLowerCase();
+      if (!(g.white || '').toLowerCase().includes(search) &&
+          !(g.black || '').toLowerCase().includes(search) &&
+          !(g.eco || '').toLowerCase().includes(search)) return false;
+    }
+    if (filter === 'win')  return (g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You');
+    if (filter === 'loss') return (g.result === '0-1' && g.white === 'You') || (g.result === '1-0' && g.black === 'You');
+    if (filter === 'draw') return g.result === '½-½';
+    return true;
+  });
+
+  const chips = [
+    { key: 'all',  label: 'All' },
+    { key: 'win',  label: 'Won' },
+    { key: 'loss', label: 'Lost' },
+    { key: 'draw', label: 'Draw' },
+  ];
+
+  return (
+    <div style={{
+      paddingTop: 56, paddingBottom: 110,
+      background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
+    }}>
+      <div style={{ padding: '4px 20px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <BackButton onClick={() => nav.back()} />
+        <div style={{
+          fontFamily: 'var(--display)', fontSize: 22, fontWeight: 700,
+          letterSpacing: -0.5, flex: 1,
+        }}>All Games</div>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+          fontWeight: 600, letterSpacing: 0.3,
+        }}>{filtered.length}</div>
+      </div>
+
+      {/* Search */}
+      <div style={{ padding: '14px 20px 0' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: 12, padding: '0 14px', height: 42,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" style={{ color: 'var(--fg-3)', flexShrink: 0 }}>
+            <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M10 10l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          <input
+            value={q} onChange={e => setQ(e.target.value)}
+            placeholder="Search by player or opening…"
+            style={{
+              flex: 1, border: 'none', background: 'transparent',
+              fontFamily: 'var(--sans)', fontSize: 14, color: 'var(--fg)', outline: 'none',
+            }}
+          />
+          {q && <div onClick={() => setQ('')} style={{ color: 'var(--fg-3)', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</div>}
+        </div>
+      </div>
+
+      {/* Filter chips */}
+      <div style={{ display: 'flex', gap: 8, padding: '10px 20px 0', overflowX: 'auto', scrollbarWidth: 'none' }}>
+        {chips.map(c => (
+          <div key={c.key} onClick={() => setFilter(c.key)} style={{
+            flexShrink: 0, padding: '5px 14px', borderRadius: 999,
+            background: filter === c.key ? 'var(--ink)' : 'var(--surface)',
+            border: '1px solid var(--border)',
+            color: filter === c.key ? 'var(--paper)' : 'var(--fg-2)',
+            fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600,
+            cursor: 'pointer', letterSpacing: 0.3,
+            transition: 'background 0.15s',
+          }}>{c.label}</div>
+        ))}
+      </div>
+
+      <div style={{ padding: '14px 20px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {filtered.length === 0 ? (
+          <EmptyState
+            icon="♟"
+            title="No games found"
+            body={q || filter !== 'all' ? 'Try changing your search or filter.' : 'Scan a score sheet to get started.'}
+            action={q || filter !== 'all' ? null : 'Scan now'}
+            onAction={q || filter !== 'all' ? null : () => nav.go('scan')}
+          />
+        ) : (
+          filtered.map(g => {
+            const tName = g.tournament ? (TOURNAMENTS.find(t => t.id === g.tournament) || {}).name : null;
+            return (
+              <div key={g.id}>
+                {tName && g.round && (
+                  <div style={{
+                    fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)',
+                    letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: 600,
+                    padding: '0 2px 5px',
+                  }}>{tName} · Rd {g.round}</div>
+                )}
+                <GameCard game={g} onTap={() => nav.go('replay', { id: g.id })} />
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// Edit Game screen — fix OCR mistakes
+// ──────────────────────────────────────────────────────────
+function EditGameScreen({ nav, params }) {
+  const game = params.game || GAMES.find(g => g.id === params.id);
+  if (!game) return null;
+
+  const RESULTS = [
+    { v: '1-0',  label: 'White won (1–0)' },
+    { v: '0-1',  label: 'Black won (0–1)' },
+    { v: '½-½',  label: 'Draw (½–½)' },
+    { v: '*',    label: 'Unknown / ongoing' },
+  ];
+  const RESULT_TO_BACKEND = { '1-0': 'white_won', '0-1': 'black_won', '½-½': 'draw', '*': 'unknown' };
+
+  const [white, setWhite]   = React.useState(game.white || '');
+  const [black, setBlack]   = React.useState(game.black || '');
+  const [result, setResult] = React.useState(game.result || '*');
+  const [date, setDate]     = React.useState(game.date || '');
+  const [round, setRound]   = React.useState(String(game.round || ''));
+  const [event, setEvent]   = React.useState(game.event || '');
+  const [notes, setNotes]   = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError]   = React.useState(null);
+
+  async function handleSave() {
+    setSaving(true); setError(null);
+    try {
+      const updates = {
+        white_player: white.trim() || null,
+        black_player: black.trim() || null,
+        result: RESULT_TO_BACKEND[result] || 'unknown',
+        game_date: date || null,
+        round: round.trim() || null,
+        event: event.trim() || null,
+        notes: notes.trim() || null,
+      };
+      if (game._backendId) {
+        const updated = await apiUpdateGame(game._backendId, updates);
+        // Patch local cache
+        const idx = GAMES.findIndex(g => g.id === game.id);
+        if (idx !== -1) {
+          GAMES[idx] = { ...GAMES[idx],
+            white: updated.white_player || white,
+            black: updated.black_player || black,
+            result: { white_won: '1-0', black_won: '0-1', draw: '½-½', unknown: '*' }[updated.result] || result,
+            date: updated.game_date || date,
+            round: updated.round || round,
+            event: updated.event || event,
+          };
+        }
+      } else {
+        // Mock data — just patch in place
+        const idx = GAMES.findIndex(g => g.id === game.id);
+        if (idx !== -1) Object.assign(GAMES[idx], { white, black, result, date, round: parseInt(round) || null, event });
+      }
+      nav.back();
+    } catch (e) {
+      setError(e.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{
+      paddingTop: 56, paddingBottom: 110,
+      background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
+    }}>
+      <div style={{ padding: '4px 20px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <BackButton onClick={() => nav.back()} />
+        <div style={{ fontFamily: 'var(--display)', fontSize: 20, fontWeight: 700, flex: 1 }}>Edit game</div>
+      </div>
+
+      <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <LiveFormField label="White player" placeholder="e.g. Kasparov" value={white} onChange={setWhite} />
+        <LiveFormField label="Black player" placeholder="e.g. Karpov"   value={black} onChange={setBlack} />
+
+        <div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+            textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600, marginBottom: 6,
+          }}>Result</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {RESULTS.map(r => (
+              <div key={r.v} onClick={() => setResult(r.v)} style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: '10px 14px', borderRadius: 10,
+                border: `1px solid ${result === r.v ? 'var(--ink)' : 'var(--border)'}`,
+                background: result === r.v ? 'var(--surface-inv)' : 'var(--surface)',
+                color: result === r.v ? 'var(--fg-inv)' : 'var(--fg)',
+                cursor: 'pointer',
+              }}>
+                <div style={{
+                  width: 18, height: 18, borderRadius: '50%',
+                  border: `2px solid ${result === r.v ? 'var(--fg-inv)' : 'var(--border-strong)'}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  {result === r.v && <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--fg-inv)' }} />}
+                </div>
+                <span style={{ fontFamily: 'var(--sans)', fontSize: 14 }}>{r.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', gap: 10 }}>
+          <LiveFormField label="Date" placeholder="YYYY-MM-DD" value={date} onChange={setDate} flex />
+          <LiveFormField label="Round" placeholder="e.g. 3" value={round} onChange={setRound} flex />
+        </div>
+        <LiveFormField label="Event / Tournament name" placeholder="e.g. City Open" value={event} onChange={setEvent} />
+        <LiveFormField label="Notes" placeholder="Add a personal note…" value={notes} onChange={setNotes} />
+
+        {error && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--loss)', padding: '4px 0' }}>
+            {error}
+          </div>
+        )}
+      </div>
+
+      <div style={{
+        position: 'absolute', bottom: 92, left: 0, right: 0,
+        padding: '14px 20px 0',
+        background: 'linear-gradient(to top, var(--bg) 60%, transparent)',
+      }}>
+        <div onClick={saving ? undefined : handleSave} style={{
+          height: 52, width: '100%', borderRadius: 14,
+          background: saving ? 'var(--fg-3)' : 'var(--ink)',
+          color: 'var(--paper)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600,
+          cursor: saving ? 'default' : 'pointer',
+          opacity: saving ? 0.7 : 1,
+          boxShadow: saving ? 'none' : 'var(--shadow-2)',
+        }}>{saving ? 'Saving…' : 'Save changes'}</div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// Action sheet (modal bottom sheet with destructive options)
+// ──────────────────────────────────────────────────────────
+function ActionSheet({ title, body, actions, onDismiss }) {
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, zIndex: 100,
+      background: 'rgba(0,0,0,0.55)',
+      backdropFilter: 'blur(6px)',
+      display: 'flex', alignItems: 'flex-end',
+    }} onClick={onDismiss}>
+      <div onClick={e => e.stopPropagation()} style={{
+        width: '100%',
+        background: 'var(--surface)',
+        borderRadius: '20px 20px 0 0',
+        padding: '20px 20px 36px',
+        boxShadow: '0 -8px 32px rgba(0,0,0,0.3)',
+      }}>
+        {title && (
+          <div style={{
+            fontFamily: 'var(--display)', fontSize: 17, fontWeight: 700,
+            color: 'var(--fg)', marginBottom: body ? 6 : 16, letterSpacing: -0.2,
+          }}>{title}</div>
+        )}
+        {body && (
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg-2)',
+            marginBottom: 18, lineHeight: 1.5,
+          }}>{body}</div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {actions.map((a, i) => (
+            <div key={i} onClick={a.onClick} style={{
+              height: 50, borderRadius: 12,
+              background: a.danger ? 'var(--loss)' : 'var(--ink)',
+              color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600,
+              cursor: 'pointer',
+            }}>{a.label}</div>
+          ))}
+          <div onClick={onDismiss} style={{
+            height: 50, borderRadius: 12,
+            border: '1px solid var(--border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600,
+            color: 'var(--fg-2)', cursor: 'pointer',
+          }}>Cancel</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
+// Empty state
+// ──────────────────────────────────────────────────────────
+function EmptyState({ icon, title, body, action, onAction }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      padding: '48px 32px',
+      color: 'var(--fg)',
+    }}>
+      <div style={{ fontSize: 40, marginBottom: 16, lineHeight: 1 }}>{icon}</div>
+      <div style={{
+        fontFamily: 'var(--display)', fontSize: 18, fontWeight: 700,
+        letterSpacing: -0.3, marginBottom: 8, textAlign: 'center',
+      }}>{title}</div>
+      <div style={{
+        fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg-2)',
+        textAlign: 'center', lineHeight: 1.5, maxWidth: 240, marginBottom: 20,
+      }}>{body}</div>
+      {action && onAction && (
+        <div onClick={onAction} style={{
+          padding: '10px 22px', borderRadius: 12,
+          background: 'var(--ink)', color: 'var(--paper)',
+          fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 600,
+          cursor: 'pointer', boxShadow: 'var(--shadow-2)',
+        }}>{action}</div>
+      )}
+    </div>
+  );
+}
+
 Object.assign(window, {
   AppHeader, SectionLabel, TournamentCard, GameCard, ResultBadge, StatTile,
-  HomeScreen, TournamentScreen,
+  HomeScreen, TournamentScreen, TournamentsListScreen, GamesListScreen,
+  EditGameScreen, SwipeableGameCard, ActionSheet, EmptyState,
+  computeUserStats,
   formatDate, daysAgo, TODAY, parseLocal,
 });

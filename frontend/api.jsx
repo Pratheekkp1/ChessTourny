@@ -72,6 +72,27 @@ async function apiDeleteGame(id) {
   if (!r.ok) throw new Error(`Delete failed: ${r.status}`);
 }
 
+/** Patch editable metadata. Only provided keys are updated. */
+async function apiUpdateGame(id, updates) {
+  return apiFetch(`/games/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+}
+
+/** Returns the URL of the original score sheet image (no fetch — just the URL string). */
+function apiGetGameImageUrl(backendId) {
+  return `${API_BASE}/games/${backendId}/image`;
+}
+
+/** Download PGN text for a game. */
+async function apiGetGamePGN(backendId) {
+  const r = await fetch(`${API_BASE}/games/${backendId}/pgn`);
+  if (!r.ok) throw new Error(`PGN fetch failed: ${r.status}`);
+  return r.text();
+}
+
 // ── Data converters ──────────────────────────────────────────
 
 const RESULT_MAP = {
@@ -189,6 +210,9 @@ Object.assign(window, {
   apiGetGame,
   apiCreateGame,
   apiDeleteGame,
+  apiUpdateGame,
+  apiGetGameImageUrl,
+  apiGetGamePGN,
   uciToMove,
   backendGameToFrontend,
   backendGameSummaryToFrontend,

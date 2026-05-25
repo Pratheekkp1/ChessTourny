@@ -52,7 +52,34 @@ function ReplayView({ nav, game, moves }) {
   const [playing, setPlaying] = React.useState(false);
   const [speed] = React.useState(1.0);
   const [flipped, setFlipped] = React.useState(game.black === 'You');
+  const [showExportSheet, setShowExportSheet] = React.useState(false);
+  const [exportLoading, setExportLoading] = React.useState(false);
+  const [exportToast, setExportToast] = React.useState(null);
+  const [showImageOverlay, setShowImageOverlay] = React.useState(false);
   const moveListRef = React.useRef(null);
+
+  // Swipe-to-navigate on the board
+  const swipeRef = React.useRef(null);
+  const swipeStart = React.useRef(null);
+
+  const handleBoardPointerDown = (e) => {
+    swipeStart.current = { x: e.clientX, y: e.clientY };
+  };
+  const handleBoardPointerUp = (e) => {
+    if (!swipeStart.current) return;
+    const dx = e.clientX - swipeStart.current.x;
+    const dy = e.clientY - swipeStart.current.y;
+    swipeStart.current = null;
+    // Only register as swipe if horizontal motion dominates
+    if (Math.abs(dx) < 24 || Math.abs(dx) < Math.abs(dy) * 1.2) return;
+    if (dx < 0) {
+      // Swipe left → next ply
+      setPly(p => Math.min(totalPlies - 1, p + 1));
+    } else {
+      // Swipe right → prev ply
+      setPly(p => Math.max(0, p - 1));
+    }
+  };
 
   React.useEffect(() => {
     if (!playing) return;
@@ -70,13 +97,70 @@ function ReplayView({ nav, game, moves }) {
     }
   }, [ply]);
 
+  // Keyboard navigation
+  React.useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'ArrowRight') setPly(p => Math.min(totalPlies - 1, p + 1));
+      if (e.key === 'ArrowLeft')  setPly(p => Math.max(0, p - 1));
+      if (e.key === 'ArrowUp')    setPly(0);
+      if (e.key === 'ArrowDown')  setPly(totalPlies - 1);
+      if (e.key === ' ')          setPlaying(p => !p);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [totalPlies]);
+
+  const showToast = (msg, ok = true) => {
+    setExportToast({ msg, ok });
+    setTimeout(() => setExportToast(null), 2800);
+  };
+
+  const handleCopyPGN = async () => {
+    setShowExportSheet(false);
+    setExportLoading(true);
+    try {
+      let text;
+      if (game._backendId) {
+        text = await apiGetGamePGN(game._backendId);
+      } else {
+        // Build a minimal PGN from move san strings
+        const pairs = [];
+        for (let i = 0; i < moves.length; i += 2) {
+          const num = Math.floor(i / 2) + 1;
+          const w = moves[i]?.san || '';
+          const b = moves[i + 1]?.san || '';
+          pairs.push(`${num}. ${w}${b ? ' ' + b : ''}`);
+        }
+        text = `[White "${game.white}"]\n[Black "${game.black}"]\n[Result "${game.result}"]\n\n${pairs.join(' ')} ${game.result}`;
+      }
+      await navigator.clipboard.writeText(text);
+      showToast('PGN copied to clipboard');
+    } catch (e) {
+      showToast('Failed to copy PGN', false);
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleViewScoreSheet = () => {
+    setShowExportSheet(false);
+    if (!game._backendId) {
+      showToast('No score sheet available for demo games', false);
+      return;
+    }
+    setShowImageOverlay(true);
+  };
+
   const currentPosition = positions[ply];
   const currentMove = ply > 0 ? lastMoves[ply] : null;
   const youWhite = game.white === 'You';
   const perspective = youWhite ? 'w' : 'b';
 
-  const tournamentName = game.tournament
-    ? TOURNAMENTS.find(t => t.id === game.tournament).name + ' · Rd ' + game.round
+  const tournT = game.tournament
+    ? TOURNAMENTS.find(t => t.id === game.tournament)
+    : null;
+  const tournamentName = tournT
+    ? tournT.name + (game.round ? ' · Rd ' + game.round : '')
     : 'Casual';
 
   return (
@@ -103,7 +187,7 @@ function ReplayView({ nav, game, moves }) {
               <path d="M2 5l3-3 3 3M5 2v12M14 11l-3 3-3-3M11 14V2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
           </IconBtn>
-          <IconBtn>
+          <IconBtn onClick={() => setShowExportSheet(true)} title="Share / export">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M7 2v8M7 10l-3-3M7 10l3-3M2 11v1a1 1 0 001 1h8a1 1 0 001-1v-1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
@@ -128,11 +212,18 @@ function ReplayView({ nav, game, moves }) {
         />
       </div>
 
-      {/* board */}
-      <div style={{
-        display: 'flex', justifyContent: 'center',
-        padding: '4px 20px 12px',
-      }}>
+      {/* board — swipeable */}
+      <div
+        ref={swipeRef}
+        onPointerDown={handleBoardPointerDown}
+        onPointerUp={handleBoardPointerUp}
+        style={{
+          display: 'flex', justifyContent: 'center',
+          padding: '4px 20px 12px',
+          touchAction: 'pan-y',
+          userSelect: 'none',
+        }}
+      >
         <div style={{
           padding: 4, borderRadius: 8,
           background: 'var(--surface)',
@@ -143,6 +234,16 @@ function ReplayView({ nav, game, moves }) {
           <ChessBoard position={currentPosition} lastMove={currentMove} size={340} flipped={flipped} />
         </div>
       </div>
+
+      {/* swipe hint */}
+      {ply === 0 && moves.length > 0 && (
+        <div style={{
+          textAlign: 'center',
+          fontFamily: 'var(--mono)', fontSize: 9, color: 'var(--fg-3)',
+          letterSpacing: 0.6, textTransform: 'uppercase', marginTop: -6, marginBottom: 4,
+          opacity: 0.7,
+        }}>← swipe to navigate →</div>
+      )}
 
       {/* current move + comment */}
       <div style={{
@@ -242,6 +343,221 @@ function ReplayView({ nav, game, moves }) {
           <svg width="14" height="14" viewBox="0 0 14 14"><path d="M12 2v10M2 2l8 5-8 5V2z" stroke="currentColor" strokeWidth="1.5" fill="currentColor" strokeLinejoin="round"/></svg>
         </TransportBtn>
       </div>
+
+      {/* export action sheet */}
+      {showExportSheet && (
+        <div
+          onClick={() => setShowExportSheet(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 300,
+            background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'flex-end',
+          }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: '100%', borderRadius: '20px 20px 0 0',
+              background: 'var(--surface)',
+              border: '1px solid var(--border)',
+              padding: '16px 0 40px',
+            }}
+          >
+            <div style={{
+              width: 36, height: 4, borderRadius: 2,
+              background: 'var(--border-strong)',
+              margin: '0 auto 20px',
+            }} />
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+              textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 700,
+              textAlign: 'center', marginBottom: 16,
+            }}>Game Options</div>
+            {[
+              {
+                icon: (
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M5 6h8M5 9h5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                ),
+                label: 'Copy PGN',
+                sub: 'Copy game notation to clipboard',
+                action: handleCopyPGN,
+              },
+              ...(game._backendId ? [{
+                icon: (
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <rect x="2" y="2" width="14" height="14" rx="3" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M5 6h8M5 9h6M5 12h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+                    <circle cx="13" cy="13" r="4" fill="var(--bg)" stroke="currentColor" strokeWidth="1.5"/>
+                    <path d="M11 13l1.5 1.5L15 11.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+                  </svg>
+                ),
+                label: 'View Score Sheet',
+                sub: 'See the original handwritten notation',
+                action: handleViewScoreSheet,
+              }] : []),
+              {
+                icon: (
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <path d="M9 3v9M9 12l-3-3M9 12l3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    <path d="M3 14h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                ),
+                label: 'Download PGN',
+                sub: 'Save PGN file to device',
+                action: async () => {
+                  setShowExportSheet(false);
+                  setExportLoading(true);
+                  try {
+                    let text;
+                    if (game._backendId) {
+                      text = await apiGetGamePGN(game._backendId);
+                    } else {
+                      const pairs = [];
+                      for (let i = 0; i < moves.length; i += 2) {
+                        const num = Math.floor(i / 2) + 1;
+                        const w = moves[i]?.san || '';
+                        const b = moves[i + 1]?.san || '';
+                        pairs.push(`${num}. ${w}${b ? ' ' + b : ''}`);
+                      }
+                      text = `[White "${game.white}"]\n[Black "${game.black}"]\n[Result "${game.result}"]\n\n${pairs.join(' ')} ${game.result}`;
+                    }
+                    const blob = new Blob([text], { type: 'application/x-chess-pgn' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `${game.white}_vs_${game.black}.pgn`.replace(/\s+/g, '_');
+                    a.click();
+                    URL.revokeObjectURL(url);
+                    showToast('PGN downloaded');
+                  } catch (e) {
+                    showToast('Download failed', false);
+                  } finally {
+                    setExportLoading(false);
+                  }
+                },
+              },
+            ].map((item, idx) => (
+              <div key={idx} onClick={item.action} style={{
+                display: 'flex', alignItems: 'center', gap: 16,
+                padding: '14px 24px', cursor: 'pointer',
+                borderBottom: idx < 2 ? '1px solid var(--border)' : 'none',
+              }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: 12,
+                  background: 'var(--bg)', border: '1px solid var(--border)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  color: 'var(--fg-2)', flexShrink: 0,
+                }}>{item.icon}</div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{
+                    fontFamily: 'var(--sans)', fontSize: 16, fontWeight: 600,
+                    color: 'var(--fg)',
+                  }}>{item.label}</div>
+                  <div style={{
+                    fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg-3)',
+                    marginTop: 2,
+                  }}>{item.sub}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* score sheet image overlay */}
+      {showImageOverlay && game._backendId && (
+        <div
+          onClick={() => setShowImageOverlay(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 400,
+            background: 'rgba(0,0,0,0.92)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'flex-start',
+          }}
+        >
+          {/* header bar */}
+          <div style={{
+            width: '100%', display: 'flex', alignItems: 'center',
+            justifyContent: 'space-between', padding: '54px 20px 16px',
+          }}>
+            <div style={{
+              fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600,
+              color: '#fff',
+            }}>Score Sheet</div>
+            <div
+              onClick={() => setShowImageOverlay(false)}
+              style={{
+                width: 32, height: 32, borderRadius: 16,
+                background: 'rgba(255,255,255,0.15)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                cursor: 'pointer', color: '#fff',
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+                <path d="M1 1l10 10M11 1L1 11" stroke="white" strokeWidth="1.8" strokeLinecap="round"/>
+              </svg>
+            </div>
+          </div>
+          {/* image */}
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              flex: 1, width: '100%', overflow: 'auto',
+              display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+              padding: '0 12px 40px',
+            }}
+          >
+            <img
+              src={apiGetGameImageUrl(game._backendId)}
+              alt="Score sheet"
+              style={{
+                maxWidth: '100%', borderRadius: 12,
+                boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
+              }}
+              onError={(e) => {
+                e.target.style.display = 'none';
+                showToast('Score sheet image not available', false);
+                setShowImageOverlay(false);
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* toast */}
+      {exportToast && (
+        <div style={{
+          position: 'fixed', bottom: 100, left: '50%',
+          transform: 'translateX(-50%)',
+          background: exportToast.ok ? 'var(--ink)' : 'var(--loss)',
+          color: 'var(--paper)',
+          borderRadius: 12, padding: '10px 20px',
+          fontFamily: 'var(--sans)', fontSize: 14, fontWeight: 600,
+          zIndex: 500, whiteSpace: 'nowrap',
+          boxShadow: 'var(--shadow-2)',
+          animation: 'fadeInUp 0.2s ease',
+        }}>{exportToast.msg}</div>
+      )}
+
+      {/* export loading indicator */}
+      {exportLoading && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 450,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(0,0,0,0.2)',
+          pointerEvents: 'none',
+        }}>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--fg-3)',
+            letterSpacing: 0.5, textTransform: 'uppercase',
+            background: 'var(--surface)', padding: '14px 24px', borderRadius: 12,
+            border: '1px solid var(--border)',
+          }}>Exporting…</div>
+        </div>
+      )}
     </div>
   );
 }

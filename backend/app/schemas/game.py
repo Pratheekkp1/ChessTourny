@@ -46,6 +46,19 @@ class GameResponse(GameSummary):
     moves: list[MoveResponse]
 
 
+class GameUpdate(BaseModel):
+    """Fields the user can correct after a bad OCR scan."""
+    white_player: str | None = None
+    black_player: str | None = None
+    result: GameResult | None = None
+    game_date: date | None = None
+    round: str | None = None
+    board: str | None = None
+    event: str | None = None
+    opening: str | None = None
+    notes: str | None = None          # stored in ocr_warnings for now
+
+
 class PositionResponse(BaseModel):
     fen: str
     move_number: int

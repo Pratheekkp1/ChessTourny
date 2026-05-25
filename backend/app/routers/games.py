@@ -6,7 +6,7 @@ from sqlalchemy import select
 from app.database import get_db
 from app.models import Game, Move, Tournament
 from app.models.game import GameResult
-from app.schemas import GameResponse, GameSummary, PositionResponse
+from app.schemas import GameResponse, GameSummary, GameUpdate, PositionResponse
 from app.services import ocr_service, chess_service, storage_service
 from pathlib import Path
 import json
@@ -215,6 +215,32 @@ async def get_image(game_id: int, db: AsyncSession = Depends(get_db)):
     if not game.image_path or not Path(game.image_path).exists():
         raise HTTPException(404, "Image not found")
     return FileResponse(game.image_path)
+
+
+# ── Update a game (patch player names, result, date, notes, etc.) ────────────
+
+@router.patch("/{game_id}", response_model=GameResponse)
+async def update_game(game_id: int, body: GameUpdate, db: AsyncSession = Depends(get_db)):
+    """
+    Correct metadata after a scan — player names, result, date, round, etc.
+    Only supplied fields are updated (PATCH semantics).
+    """
+    game = await _fetch_game(game_id, db)
+    update_data = body.model_dump(exclude_none=True)
+    notes = update_data.pop("notes", None)
+
+    for field, value in update_data.items():
+        setattr(game, field, value)
+
+    if notes is not None:
+        # Append to OCR warnings so original context isn't lost
+        existing = game.ocr_warnings or ""
+        game.ocr_warnings = (existing + "\n[user note] " + notes).strip()
+
+    await db.commit()
+    await db.refresh(game)
+    await db.refresh(game, ["moves"])
+    return _serialize_game(game)
 
 
 # ── Delete a game ─────────────────────────────────────────────────────────────

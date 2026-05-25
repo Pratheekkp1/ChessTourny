@@ -19,6 +19,18 @@
   }
   ::-webkit-scrollbar { display: none; }
   * { box-sizing: border-box; }
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+  @keyframes slideUp {
+    from { transform: translateY(100%); }
+    to   { transform: translateY(0); }
+  }
 </style>
 </head>
 <body>
