@@ -230,17 +230,32 @@ function TabItem({ label, icon, active, onClick }) {
 // New tournament — stub
 // ──────────────────────────────────────────────────────────
 function NewTournamentScreen({ nav, onCreated }) {
-  const [name, setName] = React.useState('');
-  const [venue, setVenue] = React.useState('');
+  const [name, setName]         = React.useState('');
+  const [venue, setVenue]       = React.useState('');
+  const [rounds, setRounds]     = React.useState('');
   const [startDate, setStartDate] = React.useState('');
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState(null);
+  const [endDate, setEndDate]   = React.useState('');
+  const [color, setColor]       = React.useState('walnut');
+  const [saving, setSaving]     = React.useState(false);
+  const [error, setError]       = React.useState(null);
 
   async function handleCreate() {
     if (!name.trim()) { setError('Name is required'); return; }
     setSaving(true); setError(null);
     try {
-      await apiCreateTournament({ name: name.trim(), location: venue.trim() || null, startDate: startDate || null });
+      const numRounds = rounds.trim() ? parseInt(rounds.trim()) : null;
+      const raw = await apiCreateTournament({
+        name: name.trim(),
+        location: venue.trim() || null,
+        startDate: startDate || null,
+        endDate: endDate || null,
+      });
+      // Patch num_rounds separately since apiCreateTournament doesn't support it yet
+      if (numRounds && raw && raw.id) {
+        try {
+          await apiUpdateTournament(raw.id, { num_rounds: numRounds });
+        } catch (_) {}
+      }
       if (onCreated) await onCreated();
       nav.back();
     } catch (e) {
@@ -249,6 +264,13 @@ function NewTournamentScreen({ nav, onCreated }) {
       setSaving(false);
     }
   }
+
+  const colorOptions = [
+    { key: 'walnut', css: 'var(--walnut)' },
+    { key: 'moss',   css: 'var(--moss)'   },
+    { key: 'ink',    css: 'var(--ink)'    },
+    { key: 'brick',  css: 'var(--brick)'  },
+  ];
 
   return (
     <div style={{
@@ -272,21 +294,23 @@ function NewTournamentScreen({ nav, onCreated }) {
         <LiveFormField label="Name" placeholder="e.g. Northside Classic" value={name} onChange={setName} />
         <LiveFormField label="Venue" placeholder="e.g. Northside Library" value={venue} onChange={setVenue} />
         <div style={{ display: 'flex', gap: 10 }}>
-          <FormField label="Rounds" placeholder="5" flex />
-          <LiveFormField label="Start date" placeholder="2025-05-01" value={startDate} onChange={setStartDate} flex />
+          <LiveFormField label="Rounds" placeholder="5" value={rounds} onChange={setRounds} flex />
+          <LiveFormField label="Start date" placeholder="YYYY-MM-DD" value={startDate} onChange={setStartDate} flex />
         </div>
-        <FormField label="Time control" placeholder="G/90 +30" />
+        <LiveFormField label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={setEndDate} />
         <SectionLabel>Folder color</SectionLabel>
         <div style={{ display: 'flex', gap: 8 }}>
-          {[['walnut','var(--walnut)'],['moss','var(--moss)'],['ink','var(--ink)'],['brick','var(--brick)']].map(([n,c]) => (
-            <div key={n} style={{
+          {colorOptions.map(({ key, css }) => (
+            <div key={key} onClick={() => setColor(key)} style={{
               flex: 1, height: 44, borderRadius: 10,
-              border: '1px solid var(--border)', background: c,
+              border: color === key ? '3px solid var(--fg)' : '1px solid var(--border)',
+              background: css,
               display: 'flex', alignItems: 'flex-end', padding: 6,
               color: '#fff', fontFamily: 'var(--mono)', fontSize: 9,
               textTransform: 'uppercase', letterSpacing: 1, cursor: 'pointer',
               fontWeight: 600,
-            }}>{n}</div>
+              boxShadow: color === key ? 'var(--shadow-2)' : 'none',
+            }}>{key}</div>
           ))}
         </div>
         {error && (

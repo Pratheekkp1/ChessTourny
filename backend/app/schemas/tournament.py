@@ -8,6 +8,7 @@ class TournamentCreate(BaseModel):
     location: str | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
+    num_rounds: int | None = None
 
 
 class TournamentUpdate(BaseModel):
@@ -16,6 +17,7 @@ class TournamentUpdate(BaseModel):
     location: str | None = None
     start_date: datetime | None = None
     end_date: datetime | None = None
+    num_rounds: int | None = None
 
 
 class TournamentSummary(BaseModel):
@@ -25,6 +27,7 @@ class TournamentSummary(BaseModel):
     location: str | None
     start_date: datetime | None
     end_date: datetime | None
+    num_rounds: int | None
     game_count: int
     created_at: datetime
 

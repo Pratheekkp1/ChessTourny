@@ -21,7 +21,7 @@ async function apiGetTournaments() {
   return apiFetch('/tournaments');
 }
 
-async function apiCreateTournament({ name, description, location, startDate, endDate }) {
+async function apiCreateTournament({ name, description, location, startDate, endDate, numRounds }) {
   return apiFetch('/tournaments', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -31,6 +31,7 @@ async function apiCreateTournament({ name, description, location, startDate, end
       location: location || null,
       start_date: startDate ? new Date(startDate).toISOString() : null,
       end_date: endDate ? new Date(endDate).toISOString() : null,
+      num_rounds: numRounds || null,
     }),
   });
 }
@@ -207,7 +208,7 @@ function backendTournamentToFrontend(t, index) {
     _backendId: t.id,
     name: t.name,
     venue: t.location || t.description || '',
-    rounds: 5,          // could add to backend later
+    rounds: t.num_rounds || null,   // null = auto-compute from scanned games
     games: t.game_count || 0,
     startDate: startDate || new Date().toISOString().split('T')[0],
     endDate:   endDate   || new Date().toISOString().split('T')[0],

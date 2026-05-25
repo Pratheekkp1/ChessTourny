@@ -19,3 +19,12 @@ async def get_db() -> AsyncSession:
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrations: add new columns if they don't exist yet (SQLite doesn't
+        # support ALTER TABLE ADD COLUMN IF NOT EXISTS, so we catch the error)
+        for sql in [
+            "ALTER TABLE tournaments ADD COLUMN num_rounds INTEGER",
+        ]:
+            try:
+                await conn.exec_driver_sql(sql)
+            except Exception:
+                pass  # Column already exists
