@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +11,14 @@ from app.config import UPLOAD_PATH
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+
+    # Pre-load OCR models in a background thread so the first scan is instant.
+    # Uses run_in_executor so the server finishes starting before the download
+    # completes — no user-visible delay at boot.
+    from app.services.ocr_service import warm_up_models
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(None, warm_up_models)
+
     yield
 
 

@@ -14,6 +14,31 @@ import json
 router = APIRouter(prefix="/games", tags=["games"])
 
 
+# ── OCR test endpoint (dry run — no DB writes) ────────────────────────────────
+
+@router.post("/ocr-test")
+async def ocr_test(image: UploadFile = File(...)):
+    """
+    Upload a score sheet photo and get the raw OCR result back — no game is
+    created or saved.  Use this to validate the handwriting model against a
+    real score sheet before committing to the database.
+
+    Returns the full structured dict:
+      { event, date, white_player, black_player, moves: [...], warnings: [...] }
+    """
+    image_path = await storage_service.save_score_sheet(image)
+    try:
+        result = await ocr_service.analyze_score_sheet(image_path)
+    except Exception as exc:
+        storage_service.delete_score_sheet(image_path)
+        raise HTTPException(422, f"OCR failed: {exc}")
+    finally:
+        # Clean up — this endpoint never persists images
+        storage_service.delete_score_sheet(image_path)
+
+    return result
+
+
 # ── Create a game by scanning a score sheet image ─────────────────────────────
 
 @router.post("", response_model=GameResponse, status_code=201)
@@ -23,8 +48,8 @@ async def create_game(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Upload a photo of a score sheet. The backend will OCR it with Claude Vision,
-    validate all moves, and store the full game.
+    Upload a photo of a score sheet. The backend will OCR it with TrOCR
+    (handwriting model), validate all moves, and store the full game.
     """
     if tournament_id is not None:
         t = await db.get(Tournament, tournament_id)

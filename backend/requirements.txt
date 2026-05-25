@@ -8,8 +8,12 @@ aiosqlite==0.20.0
 greenlet==3.1.1
 
 # OCR — open-source handwriting recognition
-# EasyOCR (primary): installs PyTorch automatically (~800 MB on first install)
+# EasyOCR: CRAFT text detector (finds where text is on the image)
 easyocr>=1.7.2
+# TrOCR: Microsoft handwriting recognizer (reads what the text says)
+#   Model: microsoft/trocr-base-handwritten (~300 MB, downloaded on first run)
+transformers>=4.40.0
+timm>=1.0.0
 # OpenCV for image preprocessing (headless = no GUI libs needed on a server)
 opencv-python-headless>=4.10.0
 

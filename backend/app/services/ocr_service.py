@@ -1,15 +1,20 @@
 """
-Open-source OCR for handwritten chess score sheets.
+Handwritten chess score sheet OCR.
 
-Two backends (set OCR_BACKEND in .env):
-  easyocr  (default) — runs entirely locally; downloads ~300 MB of models on first use.
-  ollama            — delegates to a local Ollama vision model for Claude-level accuracy.
-                      Requires Ollama running with a vision model pulled:
-                        brew install ollama && ollama serve
-                        ollama pull llama3.2-vision   # or: moondream, qwen2.5vl
-                      Then set OLLAMA_MODEL=llama3.2-vision in .env.
+Pipeline (EasyOCR backend, the default):
+  1. OpenCV  — denoise + adaptive threshold the score sheet photo
+  2. CRAFT   — text region detection via EasyOCR (finds every handwritten token)
+  3. TrOCR   — microsoft/trocr-base-handwritten reads each region in a single
+               batched forward pass (this is the actual handwriting model)
+  4. Layout  — spatial grouping into header fields and White/Black move columns
+  5. Chess   — notation post-processing + python-chess validation
 
-Both backends return the same structured dict so the rest of the app is unaffected.
+Optional backend (OCR_BACKEND=ollama in .env):
+  Delegates to a local Ollama vision model — Claude-quality, requires Ollama running.
+  See .env.example for setup instructions.
+
+Models are downloaded once on first use and then cached by HuggingFace / EasyOCR.
+Call warm_up_models() at startup to pre-download so the first real scan is instant.
 """
 
 import asyncio
@@ -28,62 +33,102 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-# ─── Chess notation constants & helpers ───────────────────────────────────────
+# ─── Lazy model handles ───────────────────────────────────────────────────────
+
+_easyocr_reader   = None   # CRAFT text detector
+_trocr_processor  = None   # TrOCR feature extractor
+_trocr_model      = None   # TrOCR encoder-decoder
+
+
+def _get_easyocr_reader():
+    global _easyocr_reader
+    if _easyocr_reader is None:
+        try:
+            import easyocr  # type: ignore
+        except ImportError:
+            raise RuntimeError("easyocr not installed. Run: pip install easyocr")
+        logger.info("Loading CRAFT text detector (EasyOCR) — first run downloads ~300 MB …")
+        _easyocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
+        logger.info("CRAFT ready.")
+    return _easyocr_reader
+
+
+def _get_trocr():
+    global _trocr_processor, _trocr_model
+    if _trocr_processor is None:
+        try:
+            from transformers import TrOCRProcessor, VisionEncoderDecoderModel  # type: ignore
+        except ImportError:
+            raise RuntimeError("transformers not installed. Run: pip install transformers")
+
+        MODEL_ID = "microsoft/trocr-base-handwritten"
+        logger.info(f"Loading TrOCR handwriting model ({MODEL_ID}) — first run ~300 MB …")
+        _trocr_processor = TrOCRProcessor.from_pretrained(MODEL_ID)
+        _trocr_model     = VisionEncoderDecoderModel.from_pretrained(MODEL_ID)
+        _trocr_model.eval()
+        logger.info("TrOCR ready.")
+    return _trocr_processor, _trocr_model
+
+
+def warm_up_models() -> None:
+    """
+    Pre-load and cache all OCR models.
+    Call once at server startup so the first real scan is instant.
+    Runs synchronously — intended to be called from a background thread at boot.
+    """
+    backend = getattr(settings, "ocr_backend", "easyocr").lower()
+    if backend != "easyocr":
+        logger.info(f"OCR backend is '{backend}' — skipping local model warm-up.")
+        return
+
+    logger.info("Warming up OCR models …")
+    _get_easyocr_reader()
+    _get_trocr()
+    logger.info("OCR models warm-up complete.")
+
+
+# ─── Chess notation helpers ───────────────────────────────────────────────────
 
 RESULT_MAP: dict[str, str] = {
-    "white won": "white_won",
-    "white_won": "white_won",
-    "1-0": "white_won",
-    "black won": "black_won",
-    "black_won": "black_won",
-    "0-1": "black_won",
-    "draw": "draw",
-    "½-½": "draw",
-    "1/2-1/2": "draw",
-    "1/2": "draw",
+    "white won":  "white_won",
+    "white_won":  "white_won",
+    "1-0":        "white_won",
+    "black won":  "black_won",
+    "black_won":  "black_won",
+    "0-1":        "black_won",
+    "draw":       "draw",
+    "½-½":        "draw",
+    "1/2-1/2":    "draw",
+    "1/2":        "draw",
 }
 
-# Common OCR misreads in chess notation and how to fix them
+# Ordered fixup rules: (regex_pattern, replacement)
 _MOVE_FIXES: list[tuple[str, str]] = [
-    # Zero → letter-O for castling (must come first, anchored)
-    (r"^0-0-0", "O-O-O"),
-    (r"^0-0",   "O-O"),
-    # lowercase l → 1 at the start (e.g. "l.e4" → "1.e4" handled upstream)
-    (r"^l([a-h])", r"1\1"),
-    # Stray move-number prefix like "1." before the move
-    (r"^\d+\.\s*", ""),
-    # Spaces inside a move token
-    (r"\s+", ""),
-    # Stray en-passant suffix
-    (r"\s*e\.p\.?$", ""),
+    (r"^0-0-0",     "O-O-O"),  # zero → O for queenside castle
+    (r"^0-0",       "O-O"),    # zero → O for kingside castle
+    (r"^\d+\.\s*",  ""),       # strip leading "1." or "3. "
+    (r"\s+",        ""),       # no spaces inside a move token
+    (r"\s*e\.p\.?$",""),       # drop trailing en-passant marker
 ]
 
 _ANNOTATION_RE = re.compile(r"([!?]{1,2})$")
 _MOVE_NUM_RE   = re.compile(r"^(\d{1,3})\.?$")
-_VALID_SAN_RE  = re.compile(
-    r"^([KQRBN]?[a-h]?[1-8]?x?[a-h][1-8](=[QRBN])?[+#]?|O-O-O|O-O)[!?]{0,2}$"
-)
 
 
 def _clean_move(raw: str) -> tuple[str, Optional[str]]:
-    """
-    Apply chess-specific corrections to a raw OCR string.
-    Returns (cleaned_san, annotation_or_None).
-    """
+    """Apply chess-specific corrections to one raw OCR string."""
     s = (raw or "").strip()
     if not s:
         return "", None
 
-    # Pull off trailing annotation
     ann = None
     m = _ANNOTATION_RE.search(s)
     if m:
         ann = m.group(1)
         s = s[: -len(ann)]
 
-    # Sequential fixups
-    for pattern, replacement in _MOVE_FIXES:
-        s = re.sub(pattern, replacement, s)
+    for pattern, repl in _MOVE_FIXES:
+        s = re.sub(pattern, repl, s)
 
     return s, ann
 
@@ -93,7 +138,7 @@ def _normalize_result(raw: str) -> str:
 
 
 def _normalize_date(raw: str) -> Optional[str]:
-    """M/D/YY or M-D-YYYY → YYYY-MM-DD, or return raw if unparseable."""
+    """Convert M/D/YY or M-D-YYYY → YYYY-MM-DD."""
     if not raw:
         return None
     parts = re.split(r"[-/]", raw.strip())
@@ -117,36 +162,11 @@ def _empty_result(warnings: list[str]) -> dict:
     }
 
 
-# ─── EasyOCR backend ─────────────────────────────────────────────────────────
+# ─── Image preprocessing ─────────────────────────────────────────────────────
 
-_easyocr_reader = None  # lazy-loaded
-
-
-def _get_easyocr_reader():
-    global _easyocr_reader
-    if _easyocr_reader is None:
-        try:
-            import easyocr  # type: ignore
-        except ImportError:
-            raise RuntimeError(
-                "easyocr is not installed. Run:  pip install easyocr"
-            )
-        logger.info("Loading EasyOCR model (first run downloads ~300 MB) …")
-        _easyocr_reader = easyocr.Reader(["en"], gpu=False, verbose=False)
-        logger.info("EasyOCR ready.")
-    return _easyocr_reader
-
-
-def _bbox_center(bbox) -> tuple[float, float]:
-    """EasyOCR bbox format: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]"""
-    xs = [p[0] for p in bbox]
-    ys = [p[1] for p in bbox]
-    return (sum(xs) / len(xs), sum(ys) / len(ys))
-
-
-def _preprocess_image_for_ocr(image_path: str) -> np.ndarray:
+def _preprocess(image_path: str) -> np.ndarray:
     """
-    Load and enhance a score sheet image for maximum OCR accuracy.
+    Load the score sheet and enhance it for handwriting detection.
     Returns an RGB numpy array.
     """
     try:
@@ -155,56 +175,131 @@ def _preprocess_image_for_ocr(image_path: str) -> np.ndarray:
         if img_bgr is None:
             raise ValueError("cv2.imread returned None")
 
-        gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
-
-        # Mild denoising (preserves ink strokes)
-        gray = cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
-
-        # Adaptive threshold — handles uneven lighting & shadows
+        gray   = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+        gray   = cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
         thresh = cv2.adaptiveThreshold(
             gray, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY,
             blockSize=31, C=10,
         )
-
-        # Convert back to RGB for EasyOCR
         return cv2.cvtColor(thresh, cv2.COLOR_GRAY2RGB)
 
     except Exception as exc:
-        logger.warning(f"Image preprocessing failed ({exc}); using raw PIL load.")
-        pil = Image.open(image_path).convert("RGB")
-        return np.array(pil)
+        logger.warning(f"Preprocessing failed ({exc}); loading image with PIL.")
+        return np.array(Image.open(image_path).convert("RGB"))
 
 
-def _run_easyocr(image_path: str) -> list[tuple[float, float, str, float]]:
+# ─── TrOCR batched recognition ────────────────────────────────────────────────
+
+def _pad_crop(crop_rgb: np.ndarray, padding: int = 8) -> Image.Image:
+    """Add white padding around a crop so TrOCR has context at the edges."""
+    h, w = crop_rgb.shape[:2]
+    canvas = np.full((h + 2 * padding, w + 2 * padding, 3), 255, dtype=np.uint8)
+    canvas[padding:padding + h, padding:padding + w] = crop_rgb
+    return Image.fromarray(canvas)
+
+
+def _recognize_batch(img_rgb: np.ndarray, detections: list[dict]) -> list[tuple]:
     """
-    Run EasyOCR and return a flat list of (center_x, center_y, text, confidence).
+    Run TrOCR on all detected text regions in one batched forward pass.
+
+    detections: list of {x1, y1, x2, y2, cx, cy, easy_text}
+    Returns:    list of (cx, cy, text, confidence)
     """
-    reader = _get_easyocr_reader()
-    img = _preprocess_image_for_ocr(image_path)
+    import torch  # type: ignore
 
-    try:
-        raw = reader.readtext(img)
-    except Exception:
-        # Fallback: try on the original path
-        raw = reader.readtext(image_path)
+    processor, model = _get_trocr()
 
-    blocks = []
-    for bbox, text, conf in raw:
+    pil_crops:     list[Image.Image] = []
+    valid_regions: list[dict]        = []
+
+    for det in detections:
+        x1, y1, x2, y2 = det["x1"], det["y1"], det["x2"], det["y2"]
+        crop = img_rgb[y1:y2, x1:x2]
+        if crop.size == 0 or crop.shape[0] < 4 or crop.shape[1] < 4:
+            continue
+        pil_crops.append(_pad_crop(crop))
+        valid_regions.append(det)
+
+    if not pil_crops:
+        return []
+
+    # Process in chunks to stay within CPU memory limits
+    CHUNK = 32
+    all_texts: list[str] = []
+    for i in range(0, len(pil_crops), CHUNK):
+        chunk = pil_crops[i : i + CHUNK]
+        pv = processor(images=chunk, return_tensors="pt", padding=True).pixel_values
+        with torch.no_grad():
+            generated = model.generate(pv, max_new_tokens=32, num_beams=2)
+        all_texts.extend(processor.batch_decode(generated, skip_special_tokens=True))
+
+    results: list[tuple] = []
+    for det, text in zip(valid_regions, all_texts):
+        clean = text.strip()
+        # If TrOCR returned nothing, fall back to EasyOCR's own guess
+        if not clean:
+            clean = det.get("easy_text", "")
+        results.append((det["cx"], det["cy"], clean, 0.9))
+
+    return results
+
+
+# ─── CRAFT detection via EasyOCR ─────────────────────────────────────────────
+
+def _bbox_center(bbox) -> tuple[float, float]:
+    """EasyOCR bbox: [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]"""
+    xs = [p[0] for p in bbox]
+    ys = [p[1] for p in bbox]
+    return (sum(xs) / len(xs), sum(ys) / len(ys))
+
+
+def _run_ocr_pipeline(image_path: str) -> list[tuple[float, float, str, float]]:
+    """
+    Stage 1 — CRAFT detects text regions.
+    Stage 2 — TrOCR reads each region.
+    Returns flat list of (cx, cy, text, confidence).
+    """
+    reader  = _get_easyocr_reader()
+    img_rgb = _preprocess(image_path)
+
+    logger.info("CRAFT: detecting text regions …")
+    raw = reader.readtext(img_rgb, detail=1)   # [(bbox, text, conf), ...]
+    logger.info(f"CRAFT: {len(raw)} regions detected.")
+
+    if not raw:
+        return []
+
+    # Build detection list with EasyOCR's own text as fallback
+    detections: list[dict] = []
+    for bbox, easy_text, easy_conf in raw:
         cx, cy = _bbox_center(bbox)
-        blocks.append((cx, cy, text.strip(), float(conf)))
-    return blocks
+        xs = [p[0] for p in bbox]
+        ys = [p[1] for p in bbox]
+        x1, y1 = max(0, int(min(xs))), max(0, int(min(ys)))
+        x2, y2 = int(max(xs)), int(max(ys))
+        detections.append({
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "cx": cx, "cy": cy,
+            "easy_text": easy_text,
+        })
+
+    logger.info("TrOCR: recognizing handwriting …")
+    results = _recognize_batch(img_rgb, detections)
+    logger.info(f"TrOCR: recognition complete ({len(results)} tokens).")
+    return results
 
 
-# ── Header parsing ────────────────────────────────────────────────────────────
+# ─── Layout analysis ─────────────────────────────────────────────────────────
 
 def _parse_header(
     blocks: list[tuple[float, float, str, float]],
-    img_w: float,
+    img_w:  float,
 ) -> dict:
     """
-    Extract game metadata from the header region of the score sheet.
-    Approach: build a single string from all header blocks then regex-extract fields.
+    Extract game metadata from header text blocks.
+    Concatenates all blocks into one string then regex-extracts known fields.
+    The _STOP lookahead prevents any field from consuming the next label.
     """
     base = {
         "event": None, "date": None, "round": None, "board": None,
@@ -214,13 +309,11 @@ def _parse_header(
     if not blocks:
         return base
 
-    # Sort left→right, top→bottom; join into one searchable string
     ordered = sorted(blocks, key=lambda b: (b[1], b[0]))
     text = " ".join(t for _, _, t, _ in ordered)
-    logger.debug(f"Header OCR text: {text!r}")
+    logger.debug(f"Header text: {text!r}")
 
-    # _LABEL_STOP matches any known field label prefix — used to prevent greedy
-    # capture from running into the next field when blocks are concatenated.
+    # Stop capturing before the next known field label
     _STOP = r"(?=\s*(?:Event|Date|Round|Board|Section|Opening|Pairing|White|Black|Time|Result)\b|$)"
 
     def grep(*patterns: str) -> Optional[str]:
@@ -230,10 +323,8 @@ def _parse_header(
                 return m.group(1).strip()
         return None
 
-    base["event"]      = grep(
-        r"Event[:\s]+([^\|/\[\]:]{2,50}?)" + _STOP,
-        r"Tournament[:\s]+([^\|/\[\]:]{2,50}?)" + _STOP,
-    )
+    base["event"]      = grep(r"Event[:\s]+([^\|/\[\]:]{2,50}?)" + _STOP,
+                              r"Tournament[:\s]+([^\|/\[\]:]{2,50}?)" + _STOP)
     base["round"]      = grep(r"Round[:\s]*(\S+)")
     base["board"]      = grep(r"Board[:\s]*(\S+)")
     base["section"]    = grep(r"Section[:\s]+(\w[\w\s]{0,20}?)" + _STOP)
@@ -257,34 +348,32 @@ def _parse_header(
     return base
 
 
-# ── Move table parsing ────────────────────────────────────────────────────────
-
 def _parse_move_table(
-    blocks: list[tuple[float, float, str, float]],
-    img_w: float,
+    blocks:  list[tuple[float, float, str, float]],
+    img_w:   float,
 ) -> tuple[list[dict], list[str]]:
     """
-    Extract the move list from the tabular region of the score sheet.
+    Extract the move list from the tabular body of the score sheet.
 
-    All USCF-style score sheets share this 3-column layout:
-        [ move# ][ white's move ][ black's move ]
+    Score sheet column layout (all USCF / Chess4Life variants):
+        [ move# ] [ White's move ] [ Black's move ]
 
-    Algorithm:
-    1. Group OCR blocks into rows by approximate Y position.
-    2. Locate the move-number column (leftmost col containing "1", "2", … tokens).
-    3. Split the remaining width at the midpoint → white column / black column.
-    4. Assemble into structured move dicts.
+    Steps:
+    1. Group blocks into rows by approximate Y position.
+    2. Find the move-number column from tokens that match \\d{1,3}.
+    3. Split the remaining width at midpoint → White | Black.
+    4. Assemble structured move dicts.
     """
     if not blocks:
         return [], ["No blocks in the move-table region."]
 
     warnings: list[str] = []
 
-    # ── Step 1: group into rows ───────────────────────────────────────────────
-    ROW_TOL = max(img_w * 0.018, 14.0)  # blocks within this many px = same row
+    # ── Row grouping ──────────────────────────────────────────────────────────
+    ROW_TOL = max(img_w * 0.018, 14.0)
     rows: list[list[tuple]] = []
     current_row: list[tuple] = []
-    current_y: float = blocks[0][1]
+    current_y = blocks[0][1]
 
     for block in sorted(blocks, key=lambda b: (b[1], b[0])):
         cx, cy, text, conf = block
@@ -298,7 +387,7 @@ def _parse_move_table(
     if current_row:
         rows.append(current_row)
 
-    # ── Step 2: locate the move-number column ────────────────────────────────
+    # ── Column boundaries ─────────────────────────────────────────────────────
     move_num_xs: list[float] = []
     for row in rows:
         for cx, cy, text, conf in row:
@@ -306,35 +395,31 @@ def _parse_move_table(
                 move_num_xs.append(cx)
 
     if move_num_xs:
-        # Use median X of all detected move-number tokens
         move_num_xs.sort()
         col_move_right = move_num_xs[len(move_num_xs) // 2] + img_w * 0.08
         remaining_w    = img_w - col_move_right
-        col_white_x    = col_move_right + remaining_w * 0.50   # midpoint → white/black boundary
+        col_white_x    = col_move_right + remaining_w * 0.50
     else:
         col_move_right = img_w * 0.12
         col_white_x    = img_w * 0.55
-        warnings.append("Could not auto-detect move-number column; using fallback column split.")
+        warnings.append("Could not auto-detect move-number column; using fallback split.")
 
-    # ── Step 3: extract move pairs ────────────────────────────────────────────
+    # ── Move extraction ───────────────────────────────────────────────────────
     moves: list[dict] = []
-
     for row in rows:
         row_sorted = sorted(row, key=lambda b: b[0])
-
-        move_no_text  = ""
+        move_no_text = ""
         white_parts:  list[str] = []
         black_parts:  list[str] = []
 
         for cx, cy, text, conf in row_sorted:
             if cx <= col_move_right:
-                move_no_text = text          # leftmost = move number
+                move_no_text = text
             elif cx <= col_white_x:
-                white_parts.append(text)     # middle = white
+                white_parts.append(text)
             else:
-                black_parts.append(text)     # right = black
+                black_parts.append(text)
 
-        # Validate move number
         mn_clean = re.sub(r"[^\d]", "", move_no_text)
         if not mn_clean:
             continue
@@ -345,10 +430,8 @@ def _parse_move_table(
         if not (1 <= move_no <= 150):
             continue
 
-        white_raw = " ".join(white_parts).strip()
-        black_raw = " ".join(black_parts).strip()
-        white_san, white_ann = _clean_move(white_raw)
-        black_san, black_ann = _clean_move(black_raw)
+        white_san, white_ann = _clean_move(" ".join(white_parts))
+        black_san, black_ann = _clean_move(" ".join(black_parts))
 
         if white_san or black_san:
             moves.append({
@@ -359,7 +442,7 @@ def _parse_move_table(
                 "black_annotation": black_ann,
             })
 
-    # Sort and deduplicate
+    # Sort + deduplicate
     moves.sort(key=lambda m: m["move_number"])
     seen: set[int] = set()
     deduped: list[dict] = []
@@ -369,34 +452,36 @@ def _parse_move_table(
             deduped.append(mv)
 
     if not deduped:
-        warnings.append("No valid moves extracted from the move table region.")
+        warnings.append("No moves extracted from the move-table region.")
 
     return deduped, warnings
 
 
-# ── Full EasyOCR pipeline ─────────────────────────────────────────────────────
+# ─── Local model full pipeline ────────────────────────────────────────────────
 
-def _parse_with_easyocr(image_path: str) -> dict:
+def _parse_with_local_models(image_path: str) -> dict:
     """
-    End-to-end EasyOCR extraction.  Runs synchronously (call from executor).
+    End-to-end local OCR: CRAFT detection → TrOCR recognition → layout parsing.
+    Runs synchronously (call from executor to avoid blocking the event loop).
     """
-    logger.info(f"EasyOCR: processing {image_path}")
-    blocks = _run_easyocr(image_path)
+    logger.info(f"Local OCR: starting pipeline for {image_path}")
+
+    blocks = _run_ocr_pipeline(image_path)
     if not blocks:
-        return _empty_result(["EasyOCR returned no text from this image."])
+        return _empty_result(["No text detected in image."])
 
-    pil = Image.open(image_path)
+    pil      = Image.open(image_path)
     img_w, img_h = pil.size
 
-    # Separate header region (top 28%) from move table (rest)
+    # Split: top 28% = header, rest = move table
     header_y = img_h * 0.28
     header_blocks = [(cx, cy, t, c) for cx, cy, t, c in blocks if cy < header_y]
     table_blocks  = [(cx, cy, t, c) for cx, cy, t, c in blocks if cy >= header_y]
 
-    metadata         = _parse_header(header_blocks, img_w)
-    moves, warnings  = _parse_move_table(table_blocks, img_w)
+    metadata        = _parse_header(header_blocks, img_w)
+    moves, warnings = _parse_move_table(table_blocks, img_w)
 
-    logger.info(f"EasyOCR: extracted {len(moves)} moves, {len(warnings)} warnings")
+    logger.info(f"Local OCR: {len(moves)} moves, {len(warnings)} warning(s).")
     return {**metadata, "moves": moves, "warnings": warnings}
 
 
@@ -405,54 +490,39 @@ def _parse_with_easyocr(image_path: str) -> dict:
 _OLLAMA_PROMPT = """\
 You are analyzing a handwritten chess score sheet photograph.
 
-Extract everything and return ONLY a single JSON object — no markdown, no explanation.
+Return ONLY a single JSON object — no markdown, no explanation.
 
 Schema:
 {
-  "event": null,
-  "date": null,
-  "round": null,
-  "board": null,
-  "section": null,
-  "opening": null,
-  "pairing_no": null,
-  "white_player": null,
-  "black_player": null,
+  "event": null, "date": null, "round": null, "board": null,
+  "section": null, "opening": null, "pairing_no": null,
+  "white_player": null, "black_player": null,
   "result": "unknown",
   "moves": [
-    {
-      "move_number": 1,
-      "white": "e4",
-      "black": "e5",
-      "white_annotation": null,
-      "black_annotation": null
-    }
+    {"move_number": 1, "white": "e4", "black": "e5",
+     "white_annotation": null, "black_annotation": null}
   ],
   "warnings": []
 }
 
 Rules:
 • date → YYYY-MM-DD or null
-• result → one of: "white_won", "black_won", "draw", "unknown"
-• moves → SAN notation; pieces K Q R B N; pawn moves are just the square (e4, d5)
+• result → "white_won" | "black_won" | "draw" | "unknown"
+• Pieces: K Q R B N; pawns are just the square (e4 d5)
 • Castling → "O-O" or "O-O-O" (capital letter O, not zero)
-• Captures → "x", Check → "+", Mate → "#"
-• Stop the moves array when the written moves end
-• Put any uncertainties in "warnings"
+• Captures → x, Check → +, Mate → #
+• Stop moves array when the written moves end
+• Put uncertainties in "warnings"
 """
 
 
 async def _parse_with_ollama(image_path: str) -> dict:
-    """
-    Delegate OCR to a locally running Ollama vision model.
-    Model and URL are configured via OLLAMA_MODEL / OLLAMA_URL in .env.
-    """
-    import httpx  # already in requirements
+    """Delegate to a local Ollama vision model for high-accuracy extraction."""
+    import httpx
 
     ollama_url   = getattr(settings, "ollama_url",   "http://localhost:11434")
     ollama_model = getattr(settings, "ollama_model", "llama3.2-vision")
-
-    logger.info(f"Ollama OCR: model={ollama_model} url={ollama_url}")
+    logger.info(f"Ollama OCR: model={ollama_model} @ {ollama_url}")
 
     with open(image_path, "rb") as f:
         image_b64 = base64.standard_b64encode(f.read()).decode()
@@ -469,30 +539,25 @@ async def _parse_with_ollama(image_path: str) -> dict:
         resp.raise_for_status()
 
     raw = resp.json().get("response", "").strip()
-
-    # Strip markdown fences if the model added them
-    if raw.startswith("```"):
-        raw = re.sub(r"^```(?:json)?\n?", "", raw)
-        raw = re.sub(r"\n?```$",          "", raw)
+    raw = re.sub(r"^```(?:json)?\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
 
     data = json.loads(raw)
     data["result"] = _normalize_result(str(data.get("result", "")))
     return data
 
 
-# ─── Public interface ─────────────────────────────────────────────────────────
+# ─── Public API ───────────────────────────────────────────────────────────────
 
 async def analyze_score_sheet(image_path: str) -> dict:
     """
     Extract structured game data from a handwritten chess score sheet image.
 
-    Backend priority:
-      1. If OCR_BACKEND=ollama  → try Ollama; fall back to EasyOCR on failure
-      2. If OCR_BACKEND=easyocr (default) → EasyOCR only
+    Returned dict keys:
+        event, date, round, board, section, opening, pairing_no,
+        white_player, black_player, result, moves, warnings
 
-    Returns a dict with keys:
-      event, date, round, board, section, opening, pairing_no,
-      white_player, black_player, result, moves, warnings
+    Each move: {move_number, white, black, white_annotation, black_annotation}
     """
     path = Path(image_path)
     if not path.exists():
@@ -504,8 +569,8 @@ async def analyze_score_sheet(image_path: str) -> dict:
         try:
             return await _parse_with_ollama(image_path)
         except Exception as exc:
-            logger.warning(f"Ollama backend failed ({exc}); falling back to EasyOCR.")
+            logger.warning(f"Ollama failed ({exc}); falling back to local models.")
 
-    # EasyOCR is synchronous — run in a thread pool so we don't block the event loop
+    # Local pipeline is synchronous — run in a thread pool
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _parse_with_easyocr, image_path)
+    return await loop.run_in_executor(None, _parse_with_local_models, image_path)
