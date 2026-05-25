@@ -1,0 +1,17 @@
+{
+  // Live Server — serves the frontend folder on port 3000
+  "liveServer.settings.port": 3000,
+  "liveServer.settings.root": "/frontend",
+  "liveServer.settings.CustomBrowser": "chrome",
+  "liveServer.settings.donotShowInfoMsg": true,
+
+  // Open ChessTourny.html by default
+  "liveServer.settings.file": "/frontend/ChessTourny.html",
+
+  // Nice-to-haves
+  "editor.formatOnSave": true,
+  "editor.tabSize": 2,
+  "files.associations": {
+    "*.jsx": "javascriptreact"
+  }
+}
