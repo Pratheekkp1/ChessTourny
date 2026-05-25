@@ -1422,6 +1422,7 @@ function EditTournamentScreen({ nav, params }) {
 
   const [name, setName]           = React.useState(t.name || '');
   const [venue, setVenue]         = React.useState(t.venue || '');
+  const [rounds, setRounds]       = React.useState(t.rounds ? String(t.rounds) : '');
   const [startDate, setStartDate] = React.useState(t.startDate || '');
   const [endDate, setEndDate]     = React.useState(t.endDate || '');
   const [saving, setSaving]       = React.useState(false);
@@ -1431,11 +1432,13 @@ function EditTournamentScreen({ nav, params }) {
     if (!name.trim()) { setError('Tournament name is required.'); return; }
     setSaving(true); setError(null);
     try {
+      const numRounds = rounds.trim() ? parseInt(rounds.trim()) : null;
       const updates = {
         name: name.trim(),
         location: venue.trim() || null,
         start_date: startDate ? new Date(startDate).toISOString() : null,
         end_date:   endDate   ? new Date(endDate).toISOString()   : null,
+        num_rounds: numRounds,
       };
       if (t._backendId) {
         await apiUpdateTournament(t._backendId, updates);
@@ -1446,6 +1449,7 @@ function EditTournamentScreen({ nav, params }) {
         Object.assign(TOURNAMENTS[idx], {
           name: name.trim(),
           venue: venue.trim(),
+          rounds: numRounds,
           startDate: startDate || t.startDate,
           endDate:   endDate   || t.endDate,
         });
@@ -1472,9 +1476,10 @@ function EditTournamentScreen({ nav, params }) {
         <LiveFormField label="Tournament name" placeholder="e.g. Bay Area Open" value={name} onChange={setName} />
         <LiveFormField label="Venue / Location" placeholder="e.g. Golden Gate Chess Club" value={venue} onChange={setVenue} />
         <div style={{ display: 'flex', gap: 10 }}>
+          <LiveFormField label="Rounds" placeholder="e.g. 5" value={rounds} onChange={setRounds} flex />
           <LiveFormField label="Start date" placeholder="YYYY-MM-DD" value={startDate} onChange={setStartDate} flex />
-          <LiveFormField label="End date"   placeholder="YYYY-MM-DD" value={endDate}   onChange={setEndDate}   flex />
         </div>
+        <LiveFormField label="End date" placeholder="YYYY-MM-DD" value={endDate} onChange={setEndDate} />
 
         {error && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--loss)', padding: '4px 0' }}>
