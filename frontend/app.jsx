@@ -447,6 +447,8 @@ function Root() {
     content = <EditTournamentScreen nav={nav} params={cur.params} />;
   else if (cur.screen === 'quick-add-game')
     content = <QuickAddGameScreen nav={nav} params={cur.params} />;
+  else if (cur.screen === 'manual-moves')
+    content = <ManualMoveEntryScreen nav={nav} params={cur.params} />;
   else if (cur.screen === 'stats')
     content = <StatsScreen key={dataVersion} nav={nav} user={liveUser} />;
   else if (cur.screen === 'profile')
@@ -492,7 +494,7 @@ function Root() {
             overflow: 'hidden',
           }}>
             {content}
-            {!['scan', 'replay', 'edit-game', 'edit-tournament', 'quick-add-game'].includes(cur.screen) && <TabBar nav={nav} current={cur.screen} userName={liveUser.name} />}
+            {!['scan', 'replay', 'edit-game', 'edit-tournament', 'quick-add-game', 'manual-moves'].includes(cur.screen) && <TabBar nav={nav} current={cur.screen} userName={liveUser.name} />}
           </div>
         </IOSDevice>
       </div>

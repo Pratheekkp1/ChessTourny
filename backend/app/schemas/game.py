@@ -60,7 +60,7 @@ class GameUpdate(BaseModel):
 
 
 class GameCreate(BaseModel):
-    """Create a game without a score sheet (metadata-only)."""
+    """Create a game without a score sheet. Optionally include moves as SAN strings."""
     white_player: str | None = None
     black_player: str | None = None
     result: GameResult = GameResult.unknown
@@ -68,6 +68,7 @@ class GameCreate(BaseModel):
     round: str | None = None
     event: str | None = None
     tournament_id: int | None = None
+    moves: list[str] | None = None   # SAN strings e.g. ["e4", "e5", "Nf3"]
 
 
 class PositionResponse(BaseModel):

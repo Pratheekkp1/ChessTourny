@@ -159,10 +159,9 @@ This is the living feature checklist. Update it as work completes.
 - [x] **Tournament `+ Add` round** — passes round number to `QuickAddGameScreen` so it pre-fills
 - [x] **Search endpoint** — `GET /games?q=player_name` added to backend using `ilike` on white/black player; `apiGetGames(tournamentId, searchQuery)` updated with `URLSearchParams`
 
-### 🔲 TODO — ordered by priority
+- [x] **Manual move entry** — `ManualMoveEntryScreen` (screen: `manual-moves`): SAN textarea with live board preview + player/result fields; backend `POST /games/manual` now accepts `moves: list[str]`, validates with python-chess, stores Move rows; `_parseSanPreview()` handles common SAN patterns for client-side preview; accessible from `ScanError` ("Enter moves manually" link)
 
-#### Scan improvements
-- [ ] **Manual move entry** — fallback if OCR fails: tap to select moves from a piece picker
+### 🔲 TODO — ordered by priority
 
 #### Home & general
 - [ ] **Rating history graph** — track rating over time per session (requires storing rating per game)

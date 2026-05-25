@@ -77,8 +77,8 @@ async function apiDeleteGame(id) {
   if (!r.ok) throw new Error(`Delete failed: ${r.status}`);
 }
 
-/** Create a game without a score sheet (metadata-only, no OCR). */
-async function apiCreateGameManual({ white, black, result, date, round, event, tournamentId }) {
+/** Create a game without a score sheet. Optionally pass moves as SAN string array. */
+async function apiCreateGameManual({ white, black, result, date, round, event, tournamentId, moves }) {
   const RESULT_MAP = { '1-0': 'white_won', '0-1': 'black_won', '½-½': 'draw', '*': 'unknown' };
   return apiFetch('/games/manual', {
     method: 'POST',
@@ -91,6 +91,7 @@ async function apiCreateGameManual({ white, black, result, date, round, event, t
       round: round || null,
       event: event || null,
       tournament_id: tournamentId != null ? tournamentId : null,
+      moves: (moves && moves.length > 0) ? moves : null,
     }),
   });
 }

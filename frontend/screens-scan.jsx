@@ -913,22 +913,353 @@ function ScanError({ error, nav, onRetry, onRetryWithSame, tournamentId, imageFi
         </div>
       </div>
 
-      <div
-        onClick={() => nav.go('quick-add-game', { tournamentId })}
-        style={{
-          marginTop: 22,
-          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
-          letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 600,
-          cursor: 'pointer', textDecoration: 'underline',
-          textDecorationColor: 'var(--border-strong)',
-        }}
-      >Enter result manually instead</div>
+      <div style={{ display: 'flex', gap: 16, marginTop: 22 }}>
+        <div
+          onClick={() => nav.go('manual-moves', { tournamentId })}
+          style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+            letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 600,
+            cursor: 'pointer', textDecoration: 'underline',
+            textDecorationColor: 'var(--border-strong)',
+          }}
+        >Enter moves manually</div>
+        <div
+          onClick={() => nav.go('quick-add-game', { tournamentId })}
+          style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+            letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 600,
+            cursor: 'pointer', textDecoration: 'underline',
+            textDecorationColor: 'var(--border-strong)',
+          }}
+        >Result only</div>
+      </div>
     </div>
   );
+}
+
+// ──────────────────────────────────────────────────────────
+// Manual move entry screen — SAN text input with live board preview
+// ──────────────────────────────────────────────────────────
+function ManualMoveEntryScreen({ nav, params }) {
+  // params: { apiGame?, tournamentId?, round? }
+  const apiGame     = params && params.apiGame;
+  const tournamentId = params && params.tournamentId;
+
+  const RESULTS = [
+    { v: '1-0',  label: 'White won' },
+    { v: '0-1',  label: 'Black won' },
+    { v: '½-½',  label: 'Draw' },
+    { v: '*',    label: 'Unknown' },
+  ];
+
+  const [white, setWhite]       = React.useState(apiGame ? apiGame.white : '');
+  const [black, setBlack]       = React.useState(apiGame ? apiGame.black : '');
+  const [result, setResult]     = React.useState(apiGame ? apiGame.result : '*');
+  const [date, setDate]         = React.useState(apiGame ? apiGame.date : new Date().toISOString().split('T')[0]);
+  const [movesText, setMovesText] = React.useState('');
+  const [saving, setSaving]     = React.useState(false);
+  const [error, setError]       = React.useState(null);
+  const [saved, setSaved]       = React.useState(false);
+
+  // Parse SAN tokens from textarea (strip move numbers like "1.", "2.")
+  const sanTokens = React.useMemo(() => {
+    return movesText.trim()
+      .split(/[\s\n,]+/)
+      .map(t => t.trim())
+      .filter(t => t && !/^\d+\.+$/.test(t));   // drop "1." "2." etc.
+  }, [movesText]);
+
+  // Apply moves to board for live preview
+  const { boardPosition, validCount, firstError } = React.useMemo(() => {
+    let board = initialBoard();
+    let validCount = 0;
+    let firstError = null;
+    for (let i = 0; i < sanTokens.length; i++) {
+      const san = sanTokens[i];
+      // Minimal SAN → from/to mapping for the most common patterns
+      // (full validation happens on the backend; this is just for preview)
+      const move = _parseSanPreview(san, board, i % 2 === 0 ? 'w' : 'b');
+      if (!move) { firstError = san; break; }
+      board = applyMove(board, move);
+      validCount++;
+    }
+    return { boardPosition: board, validCount, firstError };
+  }, [sanTokens]);
+
+  async function handleSave() {
+    if (!white.trim() && !black.trim()) {
+      setError('Enter at least one player name.'); return;
+    }
+    setSaving(true); setError(null);
+    try {
+      const savedGame = await apiCreateGameManual({
+        white: white.trim() || null,
+        black: black.trim() || null,
+        result,
+        date,
+        round: params && params.round ? String(params.round) : null,
+        event: null,
+        tournamentId: tournamentId || null,
+        moves: sanTokens.slice(0, validCount),
+      });
+      const g = backendGameToFrontend(savedGame);
+      GAMES.unshift(g);
+      setSaved(true);
+      setTimeout(() => nav.back(), 600);
+    } catch (e) {
+      setError(e.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const moveCount = validCount;
+  const boardSize = 260;
+
+  return (
+    <div style={{
+      position: 'absolute', inset: 0, background: 'var(--bg)', color: 'var(--fg)',
+      overflowY: 'auto', paddingTop: 56, paddingBottom: 30,
+    }}>
+      {/* Header */}
+      <div style={{ padding: '4px 20px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <BackButton onClick={() => nav.back()} />
+        <div style={{ fontFamily: 'var(--display)', fontSize: 20, fontWeight: 700, flex: 1, letterSpacing: -0.3 }}>
+          Enter moves
+        </div>
+      </div>
+
+      {/* Advisory */}
+      <div style={{ margin: '16px 20px 0' }}>
+        <div style={{
+          background: 'rgba(180,160,80,0.12)', border: '1px solid rgba(180,160,80,0.25)',
+          borderRadius: 12, padding: '10px 14px',
+          fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--fg-2)', lineHeight: 1.5,
+        }}>
+          Enter moves in SAN notation (e.g. <span style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>e4 e5 Nf3 Nc6 Bb5</span>).
+          Move numbers are optional. The backend will validate all moves.
+        </div>
+      </div>
+
+      {/* Live board preview */}
+      <div style={{
+        display: 'flex', flexDirection: 'column', alignItems: 'center',
+        padding: '16px 20px 0',
+      }}>
+        <ChessBoard position={boardPosition} size={boardSize} showCoords={false} />
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+          marginTop: 8, fontWeight: 600, letterSpacing: 0.5,
+        }}>
+          {moveCount === 0 ? 'Starting position' : `${moveCount} ply${moveCount !== 1 ? '' : ''} entered`}
+          {firstError && (
+            <span style={{ color: 'var(--loss)', marginLeft: 12 }}>✗ Invalid: {firstError}</span>
+          )}
+        </div>
+      </div>
+
+      {/* Move text area */}
+      <div style={{ padding: '16px 20px 0' }}>
+        <div style={{
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+          textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600, marginBottom: 6,
+        }}>Moves (SAN)</div>
+        <textarea
+          value={movesText}
+          onChange={e => setMovesText(e.target.value)}
+          placeholder={"1. e4 e5\n2. Nf3 Nc6\n3. Bb5 a6"}
+          rows={5}
+          style={{
+            width: '100%', boxSizing: 'border-box',
+            borderRadius: 12, border: '1px solid var(--border)',
+            background: 'var(--surface)', padding: '12px 14px',
+            fontFamily: 'var(--mono)', fontSize: 13, lineHeight: 1.7,
+            color: 'var(--fg)', outline: 'none', resize: 'vertical',
+          }}
+        />
+      </div>
+
+      {/* Player names & result */}
+      <div style={{ padding: '14px 20px 0', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+              textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600, marginBottom: 5,
+            }}>White</div>
+            <input value={white} onChange={e => setWhite(e.target.value)} placeholder="Player name"
+              style={{
+                width: '100%', height: 42, borderRadius: 10, border: '1px solid var(--border)',
+                background: 'var(--surface)', padding: '0 12px', boxSizing: 'border-box',
+                fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg)', outline: 'none',
+              }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+              textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600, marginBottom: 5,
+            }}>Black</div>
+            <input value={black} onChange={e => setBlack(e.target.value)} placeholder="Player name"
+              style={{
+                width: '100%', height: 42, borderRadius: 10, border: '1px solid var(--border)',
+                background: 'var(--surface)', padding: '0 12px', boxSizing: 'border-box',
+                fontFamily: 'var(--sans)', fontSize: 13, color: 'var(--fg)', outline: 'none',
+              }} />
+          </div>
+        </div>
+
+        {/* Result radio */}
+        <div>
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+            textTransform: 'uppercase', letterSpacing: 1.2, fontWeight: 600, marginBottom: 6,
+          }}>Result</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {RESULTS.map(r => (
+              <div key={r.v} onClick={() => setResult(r.v)} style={{
+                padding: '6px 12px', borderRadius: 8,
+                background: result === r.v ? 'var(--ink)' : 'var(--surface)',
+                color: result === r.v ? 'var(--paper)' : 'var(--fg-2)',
+                border: `1px solid ${result === r.v ? 'transparent' : 'var(--border)'}`,
+                fontFamily: 'var(--mono)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                transition: 'background 0.15s',
+              }}>{r.label}</div>
+            ))}
+          </div>
+        </div>
+
+        {error && (
+          <div style={{
+            fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--loss)', padding: '4px 0',
+          }}>{error}</div>
+        )}
+      </div>
+
+      {/* Save button */}
+      <div style={{ padding: '20px 20px 0' }}>
+        <div onClick={saving || saved ? undefined : handleSave} style={{
+          height: 52, borderRadius: 14,
+          background: saved ? 'var(--win)' : saving ? 'var(--fg-3)' : 'var(--ink)',
+          color: 'var(--paper)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600,
+          cursor: saving || saved ? 'default' : 'pointer',
+          boxShadow: saving || saved ? 'none' : 'var(--shadow-2)',
+          transition: 'background 0.3s',
+        }}>
+          {saved ? '✓ Saved' : saving ? 'Saving…' : `Save game${moveCount > 0 ? ` · ${moveCount} plies` : ''}`}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Minimal SAN → move object converter for live board preview.
+ * Not a complete rules engine — just handles common patterns to show board position.
+ * Real validation happens on the backend with python-chess.
+ */
+function _parseSanPreview(san, board, color) {
+  // Strip check/mate symbols
+  const s = san.replace(/[+#!?]/g, '');
+
+  // Castling
+  if (s === 'O-O' || s === '0-0') {
+    return { castle: 'K', from: color === 'w' ? 'e1' : 'e8', san, color };
+  }
+  if (s === 'O-O-O' || s === '0-0-0') {
+    return { castle: 'Q', from: color === 'w' ? 'e1' : 'e8', san, color };
+  }
+
+  const FILES = 'abcdefgh';
+  const RANKS = '87654321'; // row 0 = rank 8
+
+  function squareToRowCol(sq) {
+    const fc = FILES.indexOf(sq[0]);
+    const rr = RANKS.indexOf(sq[1]);
+    return fc >= 0 && rr >= 0 ? [rr, fc] : null;
+  }
+
+  function rowColToSquare(r, c) {
+    return FILES[c] + RANKS[r];
+  }
+
+  function pieceChar(token) {
+    if (/^[KQRBN]/.test(token)) return token[0];
+    return color === 'w' ? 'P' : 'p';
+  }
+
+  // Pawn move: e4, exd5, e8=Q
+  const pawnMove = s.match(/^([a-h])(x)?([a-h][1-8])(=[QRBN])?$/);
+  if (pawnMove || /^[a-h][1-8]$/.test(s)) {
+    const toSq = pawnMove ? pawnMove[3] : s;
+    const capture = pawnMove && !!pawnMove[2];
+    const fromFile = pawnMove ? pawnMove[1] : s[0];
+    const [tr, tc] = squareToRowCol(toSq);
+    const piece = color === 'w' ? 'P' : 'p';
+    const direction = color === 'w' ? 1 : -1;
+
+    // Find pawn
+    let fromSq = null;
+    if (capture) {
+      const fc = FILES.indexOf(fromFile);
+      for (let r = 0; r < 8; r++) {
+        if (board[r][fc] === piece && Math.abs(r - tr) === 1) { fromSq = rowColToSquare(r, fc); break; }
+      }
+    } else {
+      const fc = FILES.indexOf(fromFile);
+      // 1-square advance
+      if (tr + direction >= 0 && tr + direction < 8 && board[tr + direction][fc] === piece) {
+        fromSq = rowColToSquare(tr + direction, fc);
+      }
+      // 2-square advance from starting rank
+      const startRank = color === 'w' ? 6 : 1;
+      if (!fromSq && tr + direction * 2 >= 0 && tr + direction * 2 < 8 &&
+          board[tr + direction * 2][fc] === piece &&
+          board[tr + direction][fc] === '' &&
+          (tr + direction * 2) === startRank) {
+        fromSq = rowColToSquare(tr + direction * 2, fc);
+      }
+    }
+    if (!fromSq) return null;
+    const promo = pawnMove && pawnMove[4] ? (color === 'w' ? pawnMove[4][1] : pawnMove[4][1].toLowerCase()) : null;
+    return { from: fromSq, to: toSq, san, capture, promotion: promo };
+  }
+
+  // Piece move: Nf3, Nxf3, Ndf3, N1f3, Ndxf3
+  const pieceMatch = s.match(/^([KQRBN])([a-h]?[1-8]?)?(x)?([a-h][1-8])$/);
+  if (!pieceMatch) return null;
+
+  const pieceLetter = pieceMatch[1];
+  const hint = pieceMatch[2] || '';
+  const toSq = pieceMatch[4];
+  const piece = color === 'w' ? pieceLetter : pieceLetter.toLowerCase();
+  const [tr, tc] = squareToRowCol(toSq);
+
+  // Find candidate pieces
+  const candidates = [];
+  for (let r = 0; r < 8; r++) {
+    for (let c = 0; c < 8; c++) {
+      if (board[r][c] !== piece) continue;
+      const sq = rowColToSquare(r, c);
+      // Apply disambiguation hint if present
+      if (hint.length === 2) { if (sq !== hint) continue; }
+      else if (hint.length === 1) {
+        if (/[a-h]/.test(hint) && FILES[c] !== hint) continue;
+        if (/[1-8]/.test(hint) && RANKS[r] !== hint) continue;
+      }
+      candidates.push({ r, c, sq });
+    }
+  }
+
+  if (candidates.length === 0) return null;
+  // Use first candidate (disambiguation is a hint, not full validation)
+  const { sq: fromSq } = candidates[0];
+  return { from: fromSq, to: toSq, san, capture: !!pieceMatch[3] };
 }
 
 Object.assign(window, {
   ScoreSheetPaper, ScanScreen, ScanAim, ScanCapturing,
   ScanReading, ScanReview, ScanError, Field, MoveGrid, CornerBrackets,
-  CameraPermissionModal,
+  CameraPermissionModal, ManualMoveEntryScreen,
 });

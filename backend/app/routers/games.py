@@ -133,8 +133,8 @@ async def create_game(
 async def create_game_manual(body: GameCreate, db: AsyncSession = Depends(get_db)):
     """
     Record a game result without uploading a score sheet.
-    Useful when the score sheet was lost or the game was informal.
-    No OCR or move validation is performed — only metadata is stored.
+    Optionally provide moves as a list of SAN strings — they will be validated
+    with python-chess and stored exactly like OCR-scanned games.
     """
     if body.tournament_id is not None:
         t = await db.get(Tournament, body.tournament_id)
@@ -148,6 +148,29 @@ async def create_game_manual(body: GameCreate, db: AsyncSession = Depends(get_db
         )
         game_number = len(result.scalars().all()) + 1
 
+    # Validate moves if provided
+    import chess as pychess
+    validated_move_pairs = []
+    warnings = []
+    if body.moves:
+        board = pychess.Board()
+        ply_moves: list[tuple] = []  # (san, uci)
+        for i, san_raw in enumerate(body.moves):
+            san = san_raw.strip()
+            if not san:
+                continue
+            try:
+                move = board.push_san(san)
+                ply_moves.append((san, move.uci()))
+            except ValueError:
+                warnings.append(f"Invalid move #{i+1}: {san}")
+                break  # stop at first invalid move
+        # Group into pairs (white, black)
+        for i in range(0, len(ply_moves), 2):
+            w = ply_moves[i] if i < len(ply_moves) else None
+            b = ply_moves[i + 1] if i + 1 < len(ply_moves) else None
+            validated_move_pairs.append((i // 2 + 1, w, b))
+
     game = Game(
         tournament_id=body.tournament_id,
         game_number=game_number,
@@ -157,13 +180,29 @@ async def create_game_manual(body: GameCreate, db: AsyncSession = Depends(get_db
         game_date=body.game_date,
         round=body.round,
         event=body.event,
-        total_moves=0,
+        total_moves=len(validated_move_pairs) * 2,
         image_path=None,
-        ocr_warnings=None,
+        ocr_warnings='; '.join(warnings) if warnings else None,
     )
     db.add(game)
     await db.commit()
     await db.refresh(game)
+
+    # Store validated moves
+    for move_num, white_mv, black_mv in validated_move_pairs:
+        mv = Move(
+            game_id=game.id,
+            move_number=move_num,
+            white_san=white_mv[0] if white_mv else None,
+            white_uci=white_mv[1] if white_mv else None,
+            black_san=black_mv[0] if black_mv else None,
+            black_uci=black_mv[1] if black_mv else None,
+        )
+        db.add(mv)
+    if validated_move_pairs:
+        await db.commit()
+        await db.refresh(game)
+
     return _serialize_game(game)
 
 
