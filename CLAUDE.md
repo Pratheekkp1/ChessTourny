@@ -155,6 +155,9 @@ This is the living feature checklist. Update it as work completes.
 - [x] **Tournament `color` field** — persisted in DB (`color VARCHAR(32)` column + auto-migration); sent on create and update; `backendTournamentToFrontend` uses backend color with index fallback
 - [x] **Retry OCR** — `ScanError` shows "Retry OCR" (re-submits same image, skips capture animation) + "Try new photo" (resets to aim); `handleRetryWithSame` in `ScanScreen`
 - [x] **Upcoming round prompts** — `HomeScreen` computes next unplayed round from tournaments with `rounds` set; shows colored banner tapping into `QuickAddGameScreen` pre-filled with round number
+- [x] **Performance score bar** — `TournamentScreen` shows stacked W/D/L progress bar below stat tiles; displays score points / total possible + score %
+- [x] **Tournament `+ Add` round** — passes round number to `QuickAddGameScreen` so it pre-fills
+- [x] **Search endpoint** — `GET /games?q=player_name` added to backend using `ilike` on white/black player; `apiGetGames(tournamentId, searchQuery)` updated with `URLSearchParams`
 
 ### 🔲 TODO — ordered by priority
 
@@ -165,8 +168,7 @@ This is the living feature checklist. Update it as work completes.
 - [ ] **Rating history graph** — track rating over time per session (requires storing rating per game)
 
 #### Backend
-- [ ] **Performance rating** — Buchholz / FIDE perf formula per tournament
-- [ ] **Search endpoint** — `GET /games?q=smith` for player name full-text search
+- [ ] **Performance rating** — Buchholz / FIDE perf formula per tournament (requires opponent ratings)
 
 ---
 

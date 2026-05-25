@@ -172,12 +172,22 @@ async def create_game_manual(body: GameCreate, db: AsyncSession = Depends(get_db
 @router.get("", response_model=list[GameSummary])
 async def list_games(
     tournament_id: int | None = Query(None),
+    q: str | None = Query(None, description="Search by player name (white or black)"),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(Game).order_by(Game.added_at.desc())
+    stmt = select(Game).order_by(Game.added_at.desc())
     if tournament_id is not None:
-        q = q.where(Game.tournament_id == tournament_id)
-    result = await db.execute(q)
+        stmt = stmt.where(Game.tournament_id == tournament_id)
+    if q:
+        pattern = f"%{q}%"
+        from sqlalchemy import or_, func
+        stmt = stmt.where(
+            or_(
+                Game.white_player.ilike(pattern),
+                Game.black_player.ilike(pattern),
+            )
+        )
+    result = await db.execute(stmt)
     games = result.scalars().all()
     return [_serialize_summary(g) for g in games]
 

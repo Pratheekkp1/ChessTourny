@@ -635,6 +635,58 @@ function TournamentScreen({ nav, params }) {
           <StatTile value={games.length + (t.rounds ? '/' + t.rounds : '')} label="Played" />
           <StatTile value={youGames.length > 0 ? Math.round((won / youGames.length) * 100) + '%' : '—'} label="Win rate" />
         </div>
+
+        {/* Performance score bar */}
+        {youGames.length > 0 && (() => {
+          const lost = youGames.length - won - drew;
+          const total = t.rounds || youGames.length;
+          const maxPts = total;
+          const scorePct = Math.round((pts / maxPts) * 100);
+          return (
+            <div style={{ marginTop: 18 }}>
+              <div style={{
+                display: 'flex', justifyContent: 'space-between', alignItems: 'baseline',
+                marginBottom: 8,
+              }}>
+                <div style={{
+                  fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+                  textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 600,
+                }}>Tournament performance</div>
+                <div style={{
+                  fontFamily: 'var(--display)', fontSize: 15, fontWeight: 700, color: 'var(--fg)',
+                }}>{pts}<span style={{ fontSize: 11, color: 'var(--fg-3)', fontWeight: 500 }}>/{maxPts} pts</span></div>
+              </div>
+              {/* Stacked W/D/L bar */}
+              <div style={{
+                height: 10, borderRadius: 999, overflow: 'hidden',
+                background: 'var(--surface-2)', display: 'flex',
+                border: '1px solid var(--border)',
+              }}>
+                <div style={{
+                  width: `${(won / maxPts) * 100}%`,
+                  background: 'var(--win)', transition: 'width 0.5s ease',
+                }} />
+                <div style={{
+                  width: `${(drew / maxPts) * 50}%`,
+                  background: 'var(--draw)', transition: 'width 0.5s ease',
+                }} />
+                <div style={{
+                  width: `${(lost / maxPts) * 100}%`,
+                  background: 'var(--loss)', opacity: 0.35, transition: 'width 0.5s ease',
+                }} />
+              </div>
+              <div style={{
+                display: 'flex', gap: 14, marginTop: 8,
+                fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)', fontWeight: 600,
+              }}>
+                <span style={{ color: 'var(--win)' }}>{won}W</span>
+                <span style={{ color: 'var(--draw)' }}>{drew}D</span>
+                <span style={{ color: 'var(--loss)', opacity: 0.6 }}>{lost}L</span>
+                <span style={{ marginLeft: 'auto' }}>{scorePct}% score</span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       <div style={{ padding: '24px 20px 0' }}>
@@ -667,7 +719,7 @@ function TournamentScreen({ nav, params }) {
                     gap: 8,
                   }}>
                     <span style={{ fontFamily: 'var(--sans)', fontSize: 13, flex: 1 }}>Not yet scanned</span>
-                    <div onClick={() => nav.go('quick-add-game', { tournamentId: t.id })} style={{
+                    <div onClick={() => nav.go('quick-add-game', { tournamentId: t.id, round: String(r) })} style={{
                       fontFamily: 'var(--mono)', fontSize: 10, fontWeight: 700,
                       padding: '4px 10px', borderRadius: 6,
                       background: 'var(--surface-2)', color: 'var(--fg-2)',

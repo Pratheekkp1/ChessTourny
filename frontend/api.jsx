@@ -52,8 +52,11 @@ async function apiDeleteTournament(id) {
 
 // ── Games ────────────────────────────────────────────────────
 
-async function apiGetGames(tournamentId) {
-  const qs = tournamentId != null ? `?tournament_id=${tournamentId}` : '';
+async function apiGetGames(tournamentId, searchQuery) {
+  const params = new URLSearchParams();
+  if (tournamentId != null) params.set('tournament_id', String(tournamentId));
+  if (searchQuery) params.set('q', searchQuery);
+  const qs = params.toString() ? '?' + params.toString() : '';
   return apiFetch(`/games${qs}`);
 }
 
