@@ -356,10 +356,22 @@ function ScanAim({ nav, tournamentId, onCapture, onFileSelected }) {
             <path d="M3 3l8 8M11 3l-8 8" stroke="#fff" strokeWidth="1.6" strokeLinecap="round"/>
           </svg>
         </div>
-        <div style={{
-          fontFamily: '"Space Grotesk", sans-serif', fontSize: 13, color: '#fff',
-          letterSpacing: 0.2, fontWeight: 600, whiteSpace: 'nowrap',
-        }}>Scan score sheet</div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{
+            fontFamily: '"Space Grotesk", sans-serif', fontSize: 13, color: '#fff',
+            letterSpacing: 0.2, fontWeight: 600, whiteSpace: 'nowrap',
+          }}>Scan score sheet</div>
+          {tournamentId && (() => {
+            const tourney = typeof TOURNAMENTS !== 'undefined' ? TOURNAMENTS.find(t => t.id === tournamentId) : null;
+            return tourney ? (
+              <div style={{
+                fontFamily: '"Geist Mono", monospace', fontSize: 9,
+                color: 'rgba(255,255,255,0.5)', marginTop: 2,
+                letterSpacing: 0.5, whiteSpace: 'nowrap',
+              }}>{tourney.name}</div>
+            ) : null;
+          })()}
+        </div>
         <div style={{
           fontFamily: '"Geist Mono", monospace', fontSize: 9, color: 'rgba(255,255,255,0.7)',
           letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: 600,
@@ -441,15 +453,26 @@ function ScanAim({ nav, tournamentId, onCapture, onFileSelected }) {
           </svg>
         </div>
       </div>
-      {/* Manual entry link */}
-      <div onClick={() => nav.go('quick-add-game', { tournamentId })} style={{
+      {/* Manual entry links */}
+      <div style={{
         textAlign: 'center', paddingBottom: 40,
-        fontFamily: '"Geist Mono", monospace', fontSize: 10,
-        color: 'rgba(255,255,255,0.45)',
-        letterSpacing: 0.6, textTransform: 'uppercase',
-        fontWeight: 600, cursor: 'pointer',
-        textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.2)',
-      }}>Enter without scanning</div>
+        display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center',
+      }}>
+        <div onClick={() => nav.go('quick-add-game', { tournamentId })} style={{
+          fontFamily: '"Geist Mono", monospace', fontSize: 10,
+          color: 'rgba(255,255,255,0.45)',
+          letterSpacing: 0.6, textTransform: 'uppercase',
+          fontWeight: 600, cursor: 'pointer',
+          textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.2)',
+        }}>Enter result only</div>
+        <div onClick={() => nav.go('manual-moves', { tournamentId })} style={{
+          fontFamily: '"Geist Mono", monospace', fontSize: 10,
+          color: 'rgba(255,255,255,0.3)',
+          letterSpacing: 0.6, textTransform: 'uppercase',
+          fontWeight: 600, cursor: 'pointer',
+          textDecoration: 'underline', textDecorationColor: 'rgba(255,255,255,0.15)',
+        }}>Enter moves manually</div>
+      </div>
     </div>
   );
 }
