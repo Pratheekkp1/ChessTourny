@@ -1268,9 +1268,21 @@ function EditGameScreen({ nav, params }) {
   const [date, setDate]     = React.useState(game.date || '');
   const [round, setRound]   = React.useState(String(game.round || ''));
   const [event, setEvent]   = React.useState(game.event || '');
-  const [notes, setNotes]   = React.useState('');
+  // Pre-fill notes from existing game.note (strip [user note] tag)
+  const existingNote = React.useMemo(() => {
+    if (!game.note) return '';
+    const tagged = game.note.split('\n').find(w => w.trim().startsWith('[user note]'));
+    return tagged ? tagged.replace('[user note]', '').trim() : '';
+  }, [game.id]);
+  const [notes, setNotes]   = React.useState(existingNote);
   const [saving, setSaving] = React.useState(false);
   const [error, setError]   = React.useState(null);
+
+  // OCR warnings (non-user-note lines)
+  const ocrWarnings = React.useMemo(() => {
+    if (!game.note) return [];
+    return game.note.split('\n').map(w => w.trim()).filter(w => w && !w.startsWith('[user note]'));
+  }, [game.id]);
 
   async function handleSave() {
     setSaving(true); setError(null);
@@ -1359,6 +1371,25 @@ function EditGameScreen({ nav, params }) {
         </div>
         <LiveFormField label="Event / Tournament name" placeholder="e.g. City Open" value={event} onChange={setEvent} />
         <LiveFormField label="Notes" placeholder="Add a personal note…" value={notes} onChange={setNotes} />
+
+        {/* Show OCR warnings as read-only info */}
+        {ocrWarnings.length > 0 && (
+          <div style={{
+            background: 'rgba(255,190,60,0.07)', border: '1px solid rgba(255,190,60,0.25)',
+            borderRadius: 10, padding: '10px 12px',
+          }}>
+            <div style={{
+              fontFamily: 'var(--mono)', fontSize: 9, color: '#FFBE3C',
+              textTransform: 'uppercase', letterSpacing: 0.8, fontWeight: 700, marginBottom: 6,
+            }}>OCR warnings</div>
+            {ocrWarnings.slice(0, 3).map((w, i) => (
+              <div key={i} style={{
+                fontFamily: 'var(--sans)', fontSize: 11, color: 'var(--fg-3)',
+                lineHeight: 1.5, marginTop: i > 0 ? 3 : 0,
+              }}>· {w}</div>
+            ))}
+          </div>
+        )}
 
         {error && (
           <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--loss)', padding: '4px 0' }}>
