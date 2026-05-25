@@ -263,9 +263,21 @@ function GameCard({ game, onTap }) {
           color: 'var(--fg-2)', fontWeight: 500, letterSpacing: 0.2,
           whiteSpace: 'nowrap', overflow: 'hidden',
         }}>
-          <span>{game.eco?.split(' — ')[0]}</span>
-          <span style={{ color: 'var(--fg-3)' }}>·</span>
-          <span>{moveCount} moves</span>
+          {moveCount > 0 ? (
+            <>
+              <span>{game.eco?.split(' — ')[0]}</span>
+              <span style={{ color: 'var(--fg-3)' }}>·</span>
+              <span>{moveCount} moves</span>
+            </>
+          ) : (
+            <span style={{
+              fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+              padding: '1px 6px', borderRadius: 4,
+              background: 'var(--surface-2)', color: 'var(--fg-3)',
+              letterSpacing: 0.6, textTransform: 'uppercase',
+              border: '1px solid var(--border)',
+            }}>No score sheet</span>
+          )}
           <span style={{ color: 'var(--fg-3)' }}>·</span>
           <span>{daysAgo(game.date)}</span>
         </div>

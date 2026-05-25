@@ -161,7 +161,7 @@ function ScanScreen({ nav, tournamentId, onGameSaved }) {
     />
   );
   if (step === 'error') return (
-    <ScanError error={apiError} nav={nav} onRetry={() => { setStep('aim'); setApiError(null); setImageFile(null); }} />
+    <ScanError error={apiError} nav={nav} tournamentId={tournamentId} onRetry={() => { setStep('aim'); setApiError(null); setImageFile(null); }} />
   );
   return null;
 }
@@ -826,7 +826,7 @@ function MoveGrid({ moves, currentPly = -1, onTap }) {
   );
 }
 
-function ScanError({ error, nav, onRetry }) {
+function ScanError({ error, nav, onRetry, tournamentId }) {
   return (
     <div style={{
       position: 'absolute', inset: 0, background: 'var(--bg)',
@@ -861,6 +861,16 @@ function ScanError({ error, nav, onRetry }) {
           cursor: 'pointer', boxShadow: 'var(--shadow-2)',
         }}>Try again</div>
       </div>
+      <div
+        onClick={() => nav.go('quick-add-game', { tournamentId })}
+        style={{
+          marginTop: 20,
+          fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
+          letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 600,
+          cursor: 'pointer', textDecoration: 'underline',
+          textDecorationColor: 'var(--border-strong)',
+        }}
+      >Enter result manually instead</div>
     </div>
   );
 }
