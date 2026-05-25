@@ -152,6 +152,18 @@ function TournamentCard({ tournament, onTap }) {
     brick:  'var(--brick)',
   };
   const accent = colorMap[t.color] || 'var(--walnut)';
+
+  // Compute live standing from scanned games
+  const tGames = GAMES.filter(g => g.tournament === t.id);
+  const youGames = tGames.filter(g => g.white === 'You' || g.black === 'You');
+  const won  = youGames.filter(g => (g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You')).length;
+  const drew = youGames.filter(g => g.result === '½-½').length;
+  const pts  = won + drew * 0.5;
+  const total = t.rounds || youGames.length;
+  const standingDisplay = youGames.length > 0 ? `${pts}` : '—';
+  const standingDenom = youGames.length > 0 ? (total || youGames.length) : null;
+  const statusChip = youGames.length > 0 ? `${won}W ${drew}D` : (t.rounds ? 'Upcoming' : 'In progress');
+
   return (
     <div onClick={onTap} style={{
       flexShrink: 0, width: 220,
@@ -171,11 +183,11 @@ function TournamentCard({ tournament, onTap }) {
         <span style={{
           fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
           color: '#fff', letterSpacing: 1, textTransform: 'uppercase',
-        }}>R{t.rounds} · {t.games} games</span>
+        }}>{t.rounds ? `R${t.rounds}` : 'Open'} · {tGames.length} game{tGames.length !== 1 ? 's' : ''}</span>
         <span style={{
-          fontFamily: 'var(--display)', fontSize: 11, fontWeight: 700,
-          color: '#fff', opacity: 0.95, letterSpacing: 0.3,
-        }}>{t.place}</span>
+          fontFamily: 'var(--display)', fontSize: 10, fontWeight: 700,
+          color: '#fff', opacity: 0.9, letterSpacing: 0.3,
+        }}>{statusChip}</span>
       </div>
 
       <div style={{ padding: 14 }}>
@@ -197,11 +209,13 @@ function TournamentCard({ tournament, onTap }) {
           <span style={{
             fontFamily: 'var(--display)', fontSize: 30, lineHeight: 1,
             color: 'var(--fg)', fontWeight: 700, letterSpacing: -1,
-          }}>{t.standing.split(' / ')[0]}</span>
-          <span style={{
-            fontFamily: 'var(--display)', fontSize: 16, lineHeight: 1,
-            color: 'var(--fg-3)', fontWeight: 500,
-          }}>/ {t.standing.split(' / ')[1]}</span>
+          }}>{standingDisplay}</span>
+          {standingDenom && (
+            <span style={{
+              fontFamily: 'var(--display)', fontSize: 16, lineHeight: 1,
+              color: 'var(--fg-3)', fontWeight: 500,
+            }}>/ {standingDenom}</span>
+          )}
         </div>
         <div style={{
           fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
@@ -943,9 +957,11 @@ function SwipeableTournamentCard({ tournament: t, onTap, onEdit, onDelete }) {
           <span style={{
             fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
             color: '#fff', letterSpacing: 1, textTransform: 'uppercase',
-          }}>{tGames.length} game{tGames.length !== 1 ? 's' : ''} scanned</span>
-          {t.place && t.place !== '—' && (
-            <span style={{ fontFamily: 'var(--display)', fontSize: 11, fontWeight: 700, color: '#fff' }}>{t.place}</span>
+          }}>{t.rounds ? `R${t.rounds}` : 'Open'} · {tGames.length} game{tGames.length !== 1 ? 's' : ''}</span>
+          {tGames.length > 0 && (
+            <span style={{ fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700, color: 'rgba(255,255,255,0.9)', letterSpacing: 0.5 }}>
+              {won + drew * 0.5}/{t.rounds || tGames.length} pts
+            </span>
           )}
         </div>
         <div style={{ padding: '12px 14px' }}>
