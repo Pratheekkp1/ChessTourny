@@ -47,8 +47,8 @@ Current order (each file exposes globals via `Object.assign(window, {...})`):
 - `nav.back()` — pop
 - `nav.reset()` — go home
 
-Screens: `'home'` | `'tournament'` | `'tournaments'` | `'all-games'` | `'scan'` | `'replay'` | `'new-tournament'` | `'edit-game'` | `'stats'` | `'profile'`  
-TabBar is hidden during `scan`, `replay`, and `edit-game` screens.
+Screens: `'home'` | `'tournament'` | `'tournaments'` | `'all-games'` | `'scan'` | `'replay'` | `'new-tournament'` | `'edit-game'` | `'edit-tournament'` | `'stats'` | `'profile'`  
+TabBar is hidden during `scan`, `replay`, `edit-game`, and `edit-tournament` screens.
 
 ### Theming
 CSS custom properties injected as inline `style` on the `IOSDevice` wrapper. Two themes (`modern`, `paper`) × two modes (`light`, `dark`) = 4 palettes in `PALETTES` map in `app.jsx`. All components use `var(--bg)`, `var(--fg)`, `var(--ink)`, `var(--moss)`, etc. — never hardcoded colors.

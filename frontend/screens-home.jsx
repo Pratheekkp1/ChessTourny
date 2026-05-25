@@ -420,6 +420,8 @@ function TournamentScreen({ nav, params }) {
   const games = GAMES.filter(g => g.tournament === params.id);
   const [confirmDelete, setConfirmDelete] = React.useState(null); // gameId to delete
   const [deleting, setDeleting] = React.useState(false);
+  const [showTournamentOptions, setShowTournamentOptions] = React.useState(false);
+  const [deletingTournament, setDeletingTournament] = React.useState(false);
   if (!t) return (
     <div style={{ padding: 40, color: 'var(--fg-3)', fontFamily: 'var(--sans)', fontSize: 14 }}>
       Tournament not found.
@@ -468,7 +470,7 @@ function TournamentScreen({ nav, params }) {
       paddingTop: 56, paddingBottom: 110,
       background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
     }}>
-      {/* Confirm delete sheet */}
+      {/* Confirm delete game sheet */}
       {confirmDelete && (
         <ActionSheet
           title="Delete this game?"
@@ -477,6 +479,29 @@ function TournamentScreen({ nav, params }) {
             { label: deleting ? 'Deleting…' : 'Delete game', danger: true, onClick: () => handleDeleteGame(confirmDelete.id, confirmDelete._backendId) },
           ]}
           onDismiss={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {/* Tournament options sheet */}
+      {showTournamentOptions && (
+        <ActionSheet
+          title={t.name}
+          body="What would you like to do with this tournament?"
+          actions={[
+            { label: 'Edit tournament', onClick: () => { setShowTournamentOptions(false); nav.go('edit-tournament', { tournament: t }); } },
+            { label: deletingTournament ? 'Deleting…' : 'Delete tournament', danger: true, onClick: async () => {
+              setDeletingTournament(true);
+              try {
+                if (t._backendId) await apiDeleteTournament(t._backendId);
+                const idx = TOURNAMENTS.findIndex(x => x.id === t.id);
+                if (idx !== -1) TOURNAMENTS.splice(idx, 1);
+                nav.reset();
+              } catch (e) { console.warn('Delete tournament failed:', e); }
+              setDeletingTournament(false);
+              setShowTournamentOptions(false);
+            }},
+          ]}
+          onDismiss={() => setShowTournamentOptions(false)}
         />
       )}
 
@@ -489,7 +514,19 @@ function TournamentScreen({ nav, params }) {
           fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--fg-3)',
           letterSpacing: 0.8, textTransform: 'uppercase', fontWeight: 600,
         }}>Tournament</div>
-        <div style={{ width: 36 }} />
+        {/* Options button */}
+        <div onClick={() => setShowTournamentOptions(true)} style={{
+          width: 36, height: 36, borderRadius: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          cursor: 'pointer', color: 'var(--fg)',
+          background: 'var(--surface)', border: '1px solid var(--border)',
+        }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <circle cx="8" cy="4" r="1.2" fill="currentColor"/>
+            <circle cx="8" cy="8" r="1.2" fill="currentColor"/>
+            <circle cx="8" cy="12" r="1.2" fill="currentColor"/>
+          </svg>
+        </div>
       </div>
 
       <div style={{ padding: '20px 20px 0' }}>
@@ -659,13 +696,161 @@ function SwipeableGameCard({ game, onTap, onDelete, onEdit }) {
 }
 
 // ──────────────────────────────────────────────────────────
+// Swipeable Tournament card (swipe left → Edit / Delete)
+// ──────────────────────────────────────────────────────────
+function SwipeableTournamentCard({ tournament: t, onTap, onEdit, onDelete }) {
+  const [offset, setOffset] = React.useState(0);
+  const [dragging, setDragging] = React.useState(false);
+  const startX = React.useRef(null);
+  const startY = React.useRef(null);
+  const locked = React.useRef(null);
+  const REVEAL = 140;
+
+  const onPointerDown = (e) => {
+    startX.current = e.clientX;
+    startY.current = e.clientY;
+    locked.current = null;
+    setDragging(false);
+  };
+  const onPointerMove = (e) => {
+    if (startX.current === null) return;
+    const dx = e.clientX - startX.current;
+    const dy = e.clientY - startY.current;
+    if (!locked.current) {
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+        locked.current = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+      }
+    }
+    if (locked.current !== 'h') return;
+    setDragging(true);
+    e.stopPropagation();
+    setOffset(Math.max(-REVEAL, Math.min(0, dx)));
+  };
+  const onPointerUp = () => {
+    startX.current = null; startY.current = null; locked.current = null;
+    setDragging(false);
+    setOffset(prev => (prev < -REVEAL / 2 ? -REVEAL : 0));
+  };
+
+  const tGames = GAMES.filter(g => g.tournament === t.id);
+  const won = tGames.filter(g =>
+    (g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You')
+  ).length;
+  const drew = tGames.filter(g => g.result === '½-½').length;
+  const colorMap = { walnut: 'var(--walnut)', moss: 'var(--moss)', ink: 'var(--ink)', brick: 'var(--brick)' };
+  const accent = colorMap[t.color] || 'var(--walnut)';
+
+  return (
+    <div style={{ position: 'relative', borderRadius: 16, overflow: 'hidden' }}>
+      {/* Action buttons revealed on swipe */}
+      <div style={{
+        position: 'absolute', right: 0, top: 0, bottom: 0,
+        display: 'flex', alignItems: 'center', paddingRight: 4,
+      }}>
+        <div onClick={onEdit} style={{
+          width: 62, height: '88%', borderRadius: 12,
+          background: 'var(--draw)', color: '#fff',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 4,
+          cursor: 'pointer', marginRight: 4,
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+          textTransform: 'uppercase', letterSpacing: 0.5,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M9.5 2.5l2 2L4 12H2v-2L9.5 2.5z" stroke="white" strokeWidth="1.4" strokeLinejoin="round"/>
+          </svg>
+          Edit
+        </div>
+        <div onClick={onDelete} style={{
+          width: 62, height: '88%', borderRadius: 12,
+          background: 'var(--loss)', color: '#fff',
+          display: 'flex', flexDirection: 'column',
+          alignItems: 'center', justifyContent: 'center', gap: 4,
+          cursor: 'pointer',
+          fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+          textTransform: 'uppercase', letterSpacing: 0.5,
+        }}>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M2 4h10M5 4V2.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5V4M6 7v4M8 7v4M3 4l.8 7.2a1 1 0 001 .8h4.4a1 1 0 001-.8L11 4" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Delete
+        </div>
+      </div>
+
+      {/* Card body (slides left on swipe) */}
+      <div
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onClick={() => { if (offset === 0 && !dragging) onTap(); }}
+        style={{
+          transform: `translateX(${offset}px)`,
+          transition: dragging ? 'none' : 'transform 0.22s ease',
+          background: 'var(--surface)', borderRadius: 16,
+          border: '1px solid var(--border)',
+          boxShadow: 'var(--shadow-1)',
+          overflow: 'hidden', cursor: 'pointer',
+          userSelect: 'none', touchAction: 'pan-y',
+        }}
+      >
+        <div style={{
+          background: accent, padding: '8px 14px',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        }}>
+          <span style={{
+            fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
+            color: '#fff', letterSpacing: 1, textTransform: 'uppercase',
+          }}>{tGames.length} game{tGames.length !== 1 ? 's' : ''} scanned</span>
+          {t.place && t.place !== '—' && (
+            <span style={{ fontFamily: 'var(--display)', fontSize: 11, fontWeight: 700, color: '#fff' }}>{t.place}</span>
+          )}
+        </div>
+        <div style={{ padding: '12px 14px' }}>
+          <div style={{
+            fontFamily: 'var(--display)', fontSize: 18, fontWeight: 600,
+            color: 'var(--fg)', letterSpacing: -0.3,
+          }}>{t.name}</div>
+          <div style={{
+            fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--fg-2)', marginTop: 2,
+          }}>{t.venue || 'No venue'} · {formatDate(t.startDate)}</div>
+          {tGames.length > 0 && (
+            <div style={{
+              display: 'flex', gap: 10, marginTop: 10,
+              fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)', fontWeight: 600,
+            }}>
+              <span style={{ color: 'var(--win)' }}>{won}W</span>
+              <span style={{ color: 'var(--loss)' }}>{tGames.length - won - drew}L</span>
+              <span style={{ color: 'var(--draw)' }}>{drew}D</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
 // All Tournaments list screen
 // ──────────────────────────────────────────────────────────
 function TournamentsListScreen({ nav }) {
   const [q, setQ] = React.useState('');
+  const [confirmDeleteT, setConfirmDeleteT] = React.useState(null);
+  const [deletingT, setDeletingT] = React.useState(false);
+
   const filtered = TOURNAMENTS.filter(t =>
     !q || t.name.toLowerCase().includes(q.toLowerCase()) || (t.venue || '').toLowerCase().includes(q.toLowerCase())
   );
+
+  async function handleDeleteTournament(t) {
+    setDeletingT(true);
+    try {
+      if (t._backendId) await apiDeleteTournament(t._backendId);
+      const idx = TOURNAMENTS.findIndex(x => x.id === t.id);
+      if (idx !== -1) TOURNAMENTS.splice(idx, 1);
+    } catch (e) { console.warn('Delete failed:', e); }
+    setConfirmDeleteT(null);
+    setDeletingT(false);
+  }
 
   return (
     <div style={{
@@ -717,6 +902,18 @@ function TournamentsListScreen({ nav }) {
         </div>
       </div>
 
+      {/* Delete confirmation */}
+      {confirmDeleteT && (
+        <ActionSheet
+          title="Delete tournament?"
+          body={`"${confirmDeleteT.name}" and all its data will be permanently removed.`}
+          actions={[
+            { label: deletingT ? 'Deleting…' : 'Delete tournament', danger: true, onClick: () => handleDeleteTournament(confirmDeleteT) },
+          ]}
+          onDismiss={() => setConfirmDeleteT(null)}
+        />
+      )}
+
       <div style={{ padding: '16px 20px 0', display: 'flex', flexDirection: 'column', gap: 12 }}>
         {filtered.length === 0 ? (
           <EmptyState
@@ -727,57 +924,15 @@ function TournamentsListScreen({ nav }) {
             onAction={q ? null : () => nav.go('new-tournament')}
           />
         ) : (
-          filtered.map(t => {
-            const tGames = GAMES.filter(g => g.tournament === t.id);
-            const won = tGames.filter(g =>
-              (g.result === '1-0' && g.white === 'You') || (g.result === '0-1' && g.black === 'You')
-            ).length;
-            const drew = tGames.filter(g => g.result === '½-½').length;
-            const colorMap = { walnut: 'var(--walnut)', moss: 'var(--moss)', ink: 'var(--ink)', brick: 'var(--brick)' };
-            const accent = colorMap[t.color] || 'var(--walnut)';
-            return (
-              <div key={t.id} onClick={() => nav.go('tournament', { id: t.id })} style={{
-                background: 'var(--surface)', borderRadius: 16,
-                border: '1px solid var(--border)',
-                boxShadow: 'var(--shadow-1)',
-                overflow: 'hidden', cursor: 'pointer',
-              }}>
-                <div style={{
-                  background: accent, padding: '8px 14px',
-                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                }}>
-                  <span style={{
-                    fontFamily: 'var(--mono)', fontSize: 9, fontWeight: 700,
-                    color: '#fff', letterSpacing: 1, textTransform: 'uppercase',
-                  }}>{tGames.length} game{tGames.length !== 1 ? 's' : ''} scanned</span>
-                  {t.place && t.place !== '—' && (
-                    <span style={{
-                      fontFamily: 'var(--display)', fontSize: 11, fontWeight: 700, color: '#fff',
-                    }}>{t.place}</span>
-                  )}
-                </div>
-                <div style={{ padding: '12px 14px' }}>
-                  <div style={{
-                    fontFamily: 'var(--display)', fontSize: 18, fontWeight: 600,
-                    color: 'var(--fg)', letterSpacing: -0.3,
-                  }}>{t.name}</div>
-                  <div style={{
-                    fontFamily: 'var(--sans)', fontSize: 12, color: 'var(--fg-2)', marginTop: 2,
-                  }}>{t.venue || 'No venue'} · {formatDate(t.startDate)}</div>
-                  {tGames.length > 0 && (
-                    <div style={{
-                      display: 'flex', gap: 10, marginTop: 10,
-                      fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--fg-3)', fontWeight: 600,
-                    }}>
-                      <span style={{ color: 'var(--win)' }}>{won}W</span>
-                      <span style={{ color: 'var(--loss)' }}>{tGames.length - won - drew}L</span>
-                      <span style={{ color: 'var(--draw)' }}>{drew}D</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            );
-          })
+          filtered.map(t => (
+            <SwipeableTournamentCard
+              key={t.id}
+              tournament={t}
+              onTap={() => nav.go('tournament', { id: t.id })}
+              onEdit={() => nav.go('edit-tournament', { tournament: t })}
+              onDelete={() => setConfirmDeleteT(t)}
+            />
+          ))
         )}
       </div>
     </div>
@@ -1038,6 +1193,96 @@ function EditGameScreen({ nav, params }) {
 }
 
 // ──────────────────────────────────────────────────────────
+// Edit Tournament screen
+// ──────────────────────────────────────────────────────────
+function EditTournamentScreen({ nav, params }) {
+  const t = params.tournament || TOURNAMENTS.find(x => x.id === params.id);
+  if (!t) return null;
+
+  const [name, setName]           = React.useState(t.name || '');
+  const [venue, setVenue]         = React.useState(t.venue || '');
+  const [startDate, setStartDate] = React.useState(t.startDate || '');
+  const [endDate, setEndDate]     = React.useState(t.endDate || '');
+  const [saving, setSaving]       = React.useState(false);
+  const [error, setError]         = React.useState(null);
+
+  async function handleSave() {
+    if (!name.trim()) { setError('Tournament name is required.'); return; }
+    setSaving(true); setError(null);
+    try {
+      const updates = {
+        name: name.trim(),
+        location: venue.trim() || null,
+        start_date: startDate ? new Date(startDate).toISOString() : null,
+        end_date:   endDate   ? new Date(endDate).toISOString()   : null,
+      };
+      if (t._backendId) {
+        await apiUpdateTournament(t._backendId, updates);
+      }
+      // Patch local cache
+      const idx = TOURNAMENTS.findIndex(x => x.id === t.id);
+      if (idx !== -1) {
+        Object.assign(TOURNAMENTS[idx], {
+          name: name.trim(),
+          venue: venue.trim(),
+          startDate: startDate || t.startDate,
+          endDate:   endDate   || t.endDate,
+        });
+      }
+      nav.back();
+    } catch (e) {
+      setError(e.message || 'Save failed');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{
+      paddingTop: 56, paddingBottom: 110,
+      background: 'var(--bg)', minHeight: '100%', color: 'var(--fg)',
+    }}>
+      <div style={{ padding: '4px 20px 0', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <BackButton onClick={() => nav.back()} />
+        <div style={{ fontFamily: 'var(--display)', fontSize: 20, fontWeight: 700, flex: 1 }}>Edit tournament</div>
+      </div>
+
+      <div style={{ padding: '20px 20px 0', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <LiveFormField label="Tournament name" placeholder="e.g. Bay Area Open" value={name} onChange={setName} />
+        <LiveFormField label="Venue / Location" placeholder="e.g. Golden Gate Chess Club" value={venue} onChange={setVenue} />
+        <div style={{ display: 'flex', gap: 10 }}>
+          <LiveFormField label="Start date" placeholder="YYYY-MM-DD" value={startDate} onChange={setStartDate} flex />
+          <LiveFormField label="End date"   placeholder="YYYY-MM-DD" value={endDate}   onChange={setEndDate}   flex />
+        </div>
+
+        {error && (
+          <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--loss)', padding: '4px 0' }}>
+            {error}
+          </div>
+        )}
+      </div>
+
+      <div style={{
+        position: 'absolute', bottom: 92, left: 0, right: 0,
+        padding: '14px 20px 0',
+        background: 'linear-gradient(to top, var(--bg) 60%, transparent)',
+      }}>
+        <div onClick={saving ? undefined : handleSave} style={{
+          height: 52, width: '100%', borderRadius: 14,
+          background: saving ? 'var(--fg-3)' : 'var(--ink)',
+          color: 'var(--paper)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: 'var(--sans)', fontSize: 15, fontWeight: 600,
+          cursor: saving ? 'default' : 'pointer',
+          opacity: saving ? 0.7 : 1,
+          boxShadow: saving ? 'none' : 'var(--shadow-2)',
+        }}>{saving ? 'Saving…' : 'Save changes'}</div>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────────────────
 // Action sheet (modal bottom sheet with destructive options)
 // ──────────────────────────────────────────────────────────
 function ActionSheet({ title, body, actions, onDismiss }) {
@@ -1125,7 +1370,9 @@ function EmptyState({ icon, title, body, action, onAction }) {
 Object.assign(window, {
   AppHeader, SectionLabel, TournamentCard, GameCard, ResultBadge, StatTile,
   HomeScreen, TournamentScreen, TournamentsListScreen, GamesListScreen,
-  EditGameScreen, SwipeableGameCard, ActionSheet, EmptyState,
+  EditGameScreen, EditTournamentScreen,
+  SwipeableGameCard, SwipeableTournamentCard,
+  ActionSheet, EmptyState,
   computeUserStats,
   formatDate, daysAgo, TODAY, parseLocal,
 });

@@ -423,6 +423,8 @@ function Root() {
     content = <GamesListScreen key={dataVersion} nav={nav} />;
   else if (cur.screen === 'edit-game')
     content = <EditGameScreen nav={nav} params={cur.params} />;
+  else if (cur.screen === 'edit-tournament')
+    content = <EditTournamentScreen nav={nav} params={cur.params} />;
   else if (cur.screen === 'stats')
     content = <StatsScreen key={dataVersion} nav={nav} user={liveUser} />;
   else if (cur.screen === 'profile')
@@ -468,7 +470,7 @@ function Root() {
             overflow: 'hidden',
           }}>
             {content}
-            {!['scan', 'replay', 'edit-game'].includes(cur.screen) && <TabBar nav={nav} current={cur.screen} userName={liveUser.name} />}
+            {!['scan', 'replay', 'edit-game', 'edit-tournament'].includes(cur.screen) && <TabBar nav={nav} current={cur.screen} userName={liveUser.name} />}
           </div>
         </IOSDevice>
       </div>
@@ -497,6 +499,7 @@ function Root() {
           <TweakButton label="Replay: Opera Game" onClick={() => setStack([{ screen: 'replay', params: { id: 'g1' } }])} />
           <TweakButton label="New tournament" onClick={() => setStack([{ screen: 'new-tournament', params: {} }])} />
           <TweakButton label="Edit game (Opera)" onClick={() => setStack([{ screen: 'edit-game', params: { id: 'g1' } }])} />
+          <TweakButton label="Edit tournament (t1)" onClick={() => setStack([{ screen: 'edit-tournament', params: { id: 't1' } }])} />
         </TweakSection>
       </TweaksPanel>
     </div>
